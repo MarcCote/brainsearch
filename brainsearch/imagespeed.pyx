@@ -32,39 +32,6 @@ ctypedef fused Data:
     Data7D
 
 
-#def blockify(Data3D arr, shape):
-#    """ Split a ndarray `arr` into overlapping blocks of size `shape` """
-#    cdef int x, y, z
-
-#    for z in range(arr.shape[0] - shape[0] + 1):
-#        for y in range(arr.shape[1] - shape[1] + 1):
-#            for x in range(arr.shape[2] - shape[2] + 1):
-#                yield arr[z:z+shape[0], y:y+shape[1], x:x+shape[2]]
-
-#cpdef blockify_nonempty(Data3D arr, Shape shape):
-#    """ Split a ndarray `arr` into overlapping blocks of size `shape` """
-#    cdef int x, y, z, i, j, k
-#    cdef float total = 0.0
-
-#    blocks = []
-
-#    with nogil:
-#        for z in range(arr.shape[0] - shape[0] + 1):
-#            for y in range(arr.shape[1] - shape[1] + 1):
-#                for x in range(arr.shape[2] - shape[2] + 1):
-#                    total = 0.0
-#                    for i in range(z, z+shape[0]):
-#                        for j in range(y, y+shape[1]):
-#                            for k in range(x, x+shape[2]):
-#                                total += arr[i, j, k]
-
-#                    if total > 0.0:
-#                        with gil:
-#                            blocks.append(arr[z:z+shape[0], y:y+shape[1], x:x+shape[2]])
-
-#    return blocks
-
-
 cdef void _blockify2D(Data2D arr, Shape shape, Data3D out, int[:,:] pos) nogil:
     cdef int x, y, z, i, j, k
     cdef int n = 0
@@ -81,6 +48,7 @@ cdef void _blockify2D(Data2D arr, Shape shape, Data3D out, int[:,:] pos) nogil:
 
             n += 1
 
+
 cdef void _blockify3D(Data3D arr, Shape shape, Data4D out, int[:,:] pos) nogil:
     cdef int x, y, z, i, j, k
     cdef int n = 0
@@ -95,7 +63,7 @@ cdef void _blockify3D(Data3D arr, Shape shape, Data4D out, int[:,:] pos) nogil:
 
                             out[n,i,j,k] = arr[z+i, y+j, x+k]
                             pos[n,0] = z
-                            pos[n,1] = x
+                            pos[n,1] = y
                             pos[n,2] = x
 
                 n += 1
@@ -149,12 +117,18 @@ cdef int _blockify3D_nonempty(Data3D arr, Shape shape, int min_nonempty, Data4D 
     return n
 
 
-
 def blockify(arr, shape, min_nonempty=None):
-    """ Split a ndarray `arr` into overlapping blocks of size `shape` """
-    cdef int x, y, z, i, j, k
-    cdef float total = 0.0
+    """ Split a ndarray `arr` into overlapping blocks of size `shape`.
 
+    Parameters
+    ----------
+    arr : 2d or 3d array
+        Array to split in blocks.
+    shape : tuple
+        Shape of the block to extract.
+    min_nonempty : int, optional
+        Tells
+    """
     if min_nonempty is None:
         block_shape = np.asarray(shape, dtype=np.int32)
         nb_blocks = np.prod(np.array(arr.shape) - block_shape + 1)

@@ -1,4 +1,9 @@
 #!/usr/bin/env python
+from __future__ import division
+
+import os
+from os.path import join as pjoin
+
 import json
 import time
 import numpy as np
@@ -10,16 +15,22 @@ from itertools import izip, chain
 import brainsearch.vizu as vizu
 
 import brainsearch.utils as brainutil
-from brainsearch.imagespeed import blockify
+#from brainsearch.imagespeed import blockify
 from brainsearch.brain_database import BrainDatabaseManager
 from brainsearch.brain_data import brain_data_factory
 
-from nearpy.hashes import RandomBinaryProjections
+from nearpy.hashes import RandomBinaryProjections, RandomPCABinaryProjections, PCABinaryProjections
 from nearpy.distances import EuclideanDistance
-from nearpy.filters import NearestFilter
+from nearpy.filters import NearestFilter, DistanceThresholdFilter
 from nearpy.utils import chunk, ichunk
 
+from brainsearch.brain_processing import BrainPipelineProcessing, BrainNormalization, BrainResampling
+
 import argparse
+
+#PORT = 4242
+PORT = 6379
+OFFSET = 0.01
 
 
 def build_subcommand_list(subparser):
@@ -44,6 +55,7 @@ def build_subcommand_clear(subparser):
                              formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     p.add_argument('names', metavar="name", type=str, nargs="*", help='name of the brain database to delete')
+    p.add_argument('-f', action='store_true', help='clear also metadata')
 
 
 def build_subcommand_init(subparser):
@@ -55,10 +67,10 @@ def build_subcommand_init(subparser):
 
     p.add_argument('name', type=str, help='name of the brain database')
     p.add_argument('shape', metavar="X,Y,...", type=str, help="data's shape or patch shape")
-    #p.add_argument('config', type=str, help='contained in a JSON file')
-    #p.add_argument('--patch', metavar="X,Y,...", type=str, help='shape of the patches (tuple)')
-    #p.add_argument('hashes', metavar="hash", type=str, nargs="+", help='hash functions to use')
     p.add_argument('--LSH', metavar="N", type=int, nargs="+", help='numbers of random projections')
+    p.add_argument('--LSH_PCA', metavar="N", type=int, nargs="+", help='numbers of random projections in PCA space')
+    p.add_argument('--PCA', metavar="K", type=int, nargs="+", help='use K eigenvectors')
+    p.add_argument('--trainset', type=str, help='JSON file use to "train" PCA')
 
 
 def build_subcommand_add(subparser):
@@ -71,9 +83,6 @@ def build_subcommand_add(subparser):
 
     p.add_argument('name', type=str, help='name of the brain database')
     p.add_argument('config', type=str, help='contained in a JSON file')
-    p.add_argument('-m', dest="min_nonempty", type=int, help='consider only patches having this minimum number of non-empty voxels')
-    p.add_argument('--skip', metavar="N", type=int, help='skip N images', default=0)
-    p.add_argument('-r', dest="resampling_factor", type=float, help='resample image before processing', default=1.)
 
 
 def build_subcommand_eval(subparser):
@@ -87,7 +96,6 @@ def build_subcommand_eval(subparser):
     p.add_argument('name', type=str, help='name of the brain database')
     p.add_argument('config', type=str, help='contained in a JSON file')
     p.add_argument('-k', type=int, help='consider at most K nearest-neighbors')
-    p.add_argument('-m', dest="min_nonempty", type=int, help='consider only patches having this minimum number of non-empty voxels')
 
 
 def build_subcommand_map(subparser):
@@ -100,8 +108,8 @@ def build_subcommand_map(subparser):
 
     p.add_argument('name', type=str, help='name of the brain database')
     p.add_argument('config', type=str, help='contained in a JSON file')
-    p.add_argument('-m', dest="min_nonempty", type=int, help='consider only patches having this minimum number of non-empty voxels')
-    p.add_argument('-r', dest="resampling_factor", type=float, help='resample image before processing', default=1.)
+    p.add_argument('-k', type=int, help='consider at most K nearest-neighbors', default=100)
+    p.add_argument('--prefix', type=str, help="prefix for the name of the results files", default="")
 
 
 def build_subcommand_check(subparser):
@@ -114,12 +122,17 @@ def build_subcommand_check(subparser):
 
     p.add_argument('name', type=str, help='name of the brain database')
     p.add_argument('config', type=str, nargs='?', help='contained in a JSON file')
-    p.add_argument('-m', dest="min_nonempty", type=int, help='consider only patches having this minimum number of non-empty voxels')
+    #p.add_argument('-m', dest="min_nonempty", type=int, help='consider only patches having this minimum number of non-empty voxels')
 
 
 def buildArgsParser():
     DESCRIPTION = "Script to perform brain searches."
     p = argparse.ArgumentParser(description=DESCRIPTION)
+
+    p.add_argument('-m', dest="min_nonempty", type=int, help='consider only patches having this minimum number of non-empty voxels')
+    p.add_argument('--skip', metavar="N", type=int, help='skip N images', default=0)
+    p.add_argument('-r', dest="resampling_factor", type=float, help='resample image before processing', default=1.)
+    p.add_argument('--norm', dest="do_normalization", action="store_true", help='perform histogram equalization')
 
     subparser = p.add_subparsers(title="brain_search commands", metavar="", dest="command")
     build_subcommand_list(subparser)
@@ -133,29 +146,29 @@ def buildArgsParser():
     return p
 
 
-def get_targets(config):
-    for source in config["sources"]:
-        if source["type"] == "file":
-            infos = np.load(source["path"])
-            for target in infos["targets"]:
-                yield target
+# def get_targets(config):
+#     for source in config["sources"]:
+#         if source["type"] == "file":
+#             infos = np.load(source["path"])
+#             for target in infos["targets"]:
+#                 yield target
 
 
-def get_data(config):
-    for source in config["sources"]:
-        if source["type"] == "file":
-            infos = np.load(source["path"])
-            if 'targets' in infos:
-                yield infos["data"], infos["targets"]
-            else:
-                yield infos["data"], []
+# def get_data(config):
+#     for source in config["sources"]:
+#         if source["type"] == "file":
+#             infos = np.load(source["path"])
+#             if 'targets' in infos:
+#                 yield infos["data"], infos["targets"]
+#             else:
+#                 yield infos["data"], []
 
 
-def get_patches(brain, patch_shape, min_nonempty=None):
-    return blockify(brain, patch_shape, min_nonempty=min_nonempty)
-    #return iter(blockify(brain, patch_shape, min_nonempty=min_nonempty))
-    #for patch, pos in :
-    #    yield patch, pos
+# def get_patches(brain, patch_shape, min_nonempty=None):
+#     return blockify(brain, patch_shape, min_nonempty=min_nonempty)
+#     #return iter(blockify(brain, patch_shape, min_nonempty=min_nonempty))
+#     #for patch, pos in :
+#     #    yield patch, pos
 
 
 def flattenize(iterable):
@@ -163,23 +176,14 @@ def flattenize(iterable):
         yield e.flatten()
 
 
-def get_patches_with_info(brain, brain_id, label, patch_shape, min_nonempty=None):
-    patches, positions = get_patches(brain, patch_shape, min_nonempty=min_nonempty)
-    nb_patches = len(patches)
-    infos = {"id": np.ones(nb_patches, dtype=np.int32) * brain_id,
-             "label": np.ones(nb_patches, dtype=np.int8) * label,
-             "position": positions}
+# def get_patches_with_info(brain, brain_id, label, patch_shape, min_nonempty=None):
+#     patches, positions = get_patches(brain, patch_shape, min_nonempty=min_nonempty)
+#     nb_patches = len(patches)
+#     infos = {"id": np.ones(nb_patches, dtype=np.int32) * brain_id,
+#              "label": np.ones(nb_patches, dtype=np.int8) * label,
+#              "position": positions}
 
-    return patches, infos
-
-    # patches, positions = get_patches(brain, patch_shape, min_nonempty=min_nonempty)
-    # for chunk_patches, chunk_positions in izip(chunk(patches, n=200000), chunk(positions, n=200000)):
-    #     nb_patches = len(chunk_patches)
-    #     infos = {"id": np.ones(nb_patches, dtype=np.int32) * brain_id,
-    #              "target": np.ones(nb_patches, dtype=np.int8) * label,
-    #              "position": chunk_positions}
-
-    #     yield chunk_patches, infos
+#     return patches, infos
 
 
 def save_nifti(image, affine, name):
@@ -191,7 +195,14 @@ def main():
     parser = buildArgsParser()
     args = parser.parse_args()
 
-    brain_manager = BrainDatabaseManager()
+    brain_manager = BrainDatabaseManager(port=PORT)
+
+    # Build processing pipeline
+    pipeline = BrainPipelineProcessing()
+    if args.do_normalization:
+        pipeline.add(BrainNormalization(type=0))
+    if args.resampling_factor > 1:
+        pipeline.add(BrainResampling(args.resampling_factor))
 
     if args.command == "list":
         def print_info(name, brain_db):
@@ -221,7 +232,7 @@ def main():
         start = time.time()
         if len(args.names) == 0:
             print "Clearing all"
-            brain_manager.remove_all_brain_databases()
+            brain_manager.remove_all_brain_databases(args.f)
         else:
             for name in args.names:
                 brain_db = brain_manager[name]
@@ -229,25 +240,67 @@ def main():
                     raise ValueError("Unexisting brain database: " + name)
 
                 print "Clearing", name
-                brain_manager.remove_brain_database(brain_db)
+                brain_manager.remove_brain_database(brain_db, args.f)
 
         print "Done in {:.2f} sec.".format(time.time()-start)
 
     elif args.command == "init":
-        print "Adding", args.name
-        shape = tuple(map(int, args.shape.split(",")))
+        print "Creating brain database {}...".format(args.name)
+        if args.name in brain_manager:
+            print "This database already exists. Please use command 'clear -f {}' before.".format(args.name)
+
+        start = time.time()
+        patch_shape = tuple(map(int, args.shape.split(",")))
 
         hashes = []
-        for nb_projections in args.LSH:
-            hash_name = "LSH{nb_projections}".format(nb_projections=nb_projections)
-            hashes.append(RandomBinaryProjections(hash_name, nb_projections, dimension=np.prod(shape)))
+        if args.LSH_PCA is not None:
+            for nb_projections in args.LSH_PCA:
+                config = json.load(open(args.trainset))
+                brain_data = brain_data_factory(config, pipeline=pipeline)
 
-        metadata = {"patch": {"dtype": np.dtype(np.float32).str, "shape": shape},
+                def _get_all_patches():
+                    for brain_id, brain in enumerate(brain_data):
+                        print "ID: {0}/{1}".format(brain_id, len(brain_data))
+                        #if brain_id == 10: break  # TODO remove
+
+                        #image, affine = brain.resample(args.resampling_factor)
+                        #patches, positions = get_patches(image, patch_shape=patch_shape, min_nonempty=args.min_nonempty)
+                        patches = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty)
+                        yield patches.reshape((-1, np.prod(patch_shape)))
+
+                hash_name = "LSH_PCA{nb_projections}".format(nb_projections=nb_projections)
+                hashes.append(RandomPCABinaryProjections(hash_name, projection_count=nb_projections, dimension=np.prod(patch_shape), trainset=_get_all_patches(), pkl="pca_p5x5x5_r2_norm_m50.pkl"))
+
+        if args.PCA is not None:
+            for projection_count in args.PCA:
+                config = json.load(open(args.trainset))
+                brain_data = brain_data_factory(config, pipeline=pipeline)
+
+                def _get_all_patches():
+                    for brain_id, brain in enumerate(brain_data):
+                        print "ID: {0}/{1}".format(brain_id, len(brain_data))
+                        #if brain_id == 10: break  # TODO remove
+
+                        #image, affine = brain.resample(args.resampling_factor)
+                        #patches, positions = get_patches(image, patch_shape=patch_shape, min_nonempty=args.min_nonempty)
+                        patches = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty)
+                        yield patches.reshape((-1, np.prod(patch_shape)))
+
+                hash_name = "PCA{projection_count}".format(projection_count=projection_count)
+                hashes.append(PCABinaryProjections(hash_name, dimension=np.prod(patch_shape), trainset=_get_all_patches(), projection_count=projection_count))
+
+        if args.LSH is not None:
+            for nb_projections in args.LSH:
+                    hash_name = "LSH{nb_projections}".format(nb_projections=nb_projections)
+                    hashes.append(RandomBinaryProjections(hash_name, nb_projections, dimension=np.prod(patch_shape)))
+
+        metadata = {"patch": {"dtype": np.dtype(np.float32).str, "shape": patch_shape},
                     "label": {"dtype": np.dtype(np.int8).str, "shape": (1,)},
                     "id": {"dtype": np.dtype(np.int32).str, "shape": (1,)},
-                    "position": {"dtype": np.dtype(np.int32).str, "shape": (2,)},
+                    "position": {"dtype": np.dtype(np.int32).str, "shape": (len(patch_shape),)},
                     }
         brain_manager.new_brain_database(args.name, hashes[0], metadata)
+        print "Created in {0:.2f} sec.".format(time.time()-start)
 
     elif args.command == "add":
         brain_db = brain_manager[args.name]
@@ -256,31 +309,24 @@ def main():
 
         patch_shape = brain_db.metadata['patch'].shape
         config = json.load(open(args.config))
-        brain_data = brain_data_factory(config, skip=args.skip)
+        brain_data = brain_data_factory(config, skip=args.skip, pipeline=pipeline)
 
         print 'Inserting...'
         nb_elements_total = 0
         start = time.time()
         for brain_id, brain in enumerate(brain_data, start=args.skip):
-            if brain_id > 30: break
-            start_brain = time.time()
-            image, affine = brain.resample(args.resampling_factor)
-            patches, datainfo = get_patches_with_info(image, brain_id, brain.label, patch_shape=patch_shape, min_nonempty=args.min_nonempty)
-            patches -= patches.mean(dtype=np.float64)
-            patches /= patches.std(dtype=np.float64)
-            #nb_elements_added = brain_database.insert_all(patches, datainfo)
-            hashkeys = brain_db.insert(patches, datainfo["label"], datainfo["position"], datainfo["id"])
+            #if brain_id == 10: break  # TODO remove
 
-            # nb_elements_added = 0
-            # for patches, datainfo in get_patches_with_info(brain, brain_id, label, patch_shape=patch_shape, min_nonempty=args.min_nonempty):
-            #     nb_elements_added += brain_database.insert_all(patches, datainfo)
-            #     print "{:,} patches added".format(nb_elements_added)
+            start_brain = time.time()
+            #image = brain.process(args.resampling_factor, args.do_normalization)
+            #image, affine = brain.resample(args.resampling_factor)
+            #patches, datainfo = get_patches_with_info(image, brain_id, brain.label, patch_shape=patch_shape, min_nonempty=args.min_nonempty)
+
+            patches, datainfo = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty, with_info=True)
+            hashkeys = brain_db.insert(patches, datainfo["label"], datainfo["position"], datainfo["id"])
 
             print "ID: {0} (label:{3}), {1:,} patches in {2:.2f} sec.".format(brain_id, len(hashkeys), time.time()-start_brain, brain.label)
             nb_elements_total += len(hashkeys)
-
-            if brain_id == 100:
-                break
 
         print "Inserted {0:,} patches ({1} brains) in {2:.2f} sec.".format(nb_elements_total, brain_id+1, time.time()-start)
 
@@ -314,7 +360,8 @@ def main():
             candidate_count_per_brain = []
             start = time.time()
             for brain_id, (brain, _) in enumerate(brain_data):
-                patches, positions = get_patches(brain, patch_shape=patch_shape, min_nonempty=args.min_nonempty)
+                patches = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty)
+                #patches, positions = get_patches(brain, patch_shape=patch_shape, min_nonempty=args.min_nonempty)
 
                 start_brain = time.time()
                 candidate_count_per_patch = brain_db.candidate_count(patches)
@@ -384,9 +431,12 @@ def main():
 
         patch_shape = brain_db.metadata['patch'].shape
         config = json.load(open(args.config))
-        brain_data = brain_data_factory(config)
+        brain_data = brain_data_factory(config, pipeline=pipeline)
 
-        pos_count, neg_count = brain_db.labels_count()
+        total_neg, total_pos = brain_db.labels_count()
+        total = float(total_pos + total_neg)
+        ratio_neg = (total_neg / total)
+        ratio_pos = (total_pos / total)
 
         print 'Mapping...'
         if "mnist" in args.name.lower():
@@ -428,92 +478,139 @@ def main():
                 #plt.imshow(image)
                 plt.show()
         else:
-            #brain_database.engine.distance = EuclideanDistance()
-            #brain_database.engine.vector_filters = [NearestFilter(100)]
+            brain_db.engine.distance = EuclideanDistance(brain_db.metadata['patch'])
+            brain_db.engine.filters = [NearestFilter(args.k)]
+            #brain_db.engine.filters = [DistanceThresholdFilter(10)]
 
             start = time.time()
             for brain_id, brain in enumerate(brain_data):
-                image, affine = brain.resample(args.resampling_factor)
-                patches, positions = get_patches(image, patch_shape=patch_shape, min_nonempty=args.min_nonempty)
-                patches -= patches.mean(dtype=np.float64)
-                patches /= patches.std(dtype=np.float64)
+                patches, positions = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty, with_positions=True)
 
-                #classif_map = np.array([brain.T, brain.T, brain.T]).T.copy() / brain.max()
-                #classif_map = np.zeros(image.shape + (3,), dtype=np.float32)
-                classif_map = np.zeros_like(image, dtype=np.float32)
+                classif_map = np.zeros_like(brain.image, dtype=np.float32)
+                parkinson_prob_map = np.zeros_like(brain.image, dtype=np.float32)
+
                 start_brain = time.time()
                 nb_neighbors_per_brain = 0
                 nb_empty = 0
 
-                for chunk_patches, chunk_positions in izip(chunk(patches, n=10000), chunk(positions, n=10000)):
-                    neighbors = brain_db.get_neighbors(chunk_patches, attributes=["label"])
-                    for id_patch, (patch, position, neighbors_label) in enumerate(izip(chunk_patches, chunk_positions, neighbors['label'])):
-                        if len(neighbors_label) == 0:
-                            nb_empty += 1
-                            continue
+                for patch_id, neighbors in brain_db.get_neighbors(patches, attributes=["label", "position"]):
+                    #patch = patches[patch_id]
+                    position = positions[patch_id]
+                    neighbors_label = neighbors['label']
+                    neighbors_position = neighbors['position']
 
-                        nb_neighbors_per_brain += len(neighbors_label)
+                    pixel_pos = position[0] + patch_shape[0]//2, position[1] + patch_shape[1]//2, position[2] + patch_shape[2]//2
 
-                        # Assume binary classification for now
-                        nb_pos = np.sum(neighbors_label, dtype=np.float64)
-                        nb_neg = len(neighbors_label) - nb_pos
-                        pos = nb_pos / pos_count
-                        neg = nb_neg / neg_count
-                        sum_pos_neg = pos + neg
-                        pos /= sum_pos_neg
-                        #neg /= sum_pos_neg
+                    if len(neighbors_position) <= 0:
+                        nb_empty += 1
+                        classif_map[pixel_pos] = 0.5 + OFFSET
+                        parkinson_prob_map[pixel_pos] = 0.5 + OFFSET
+                        continue
 
-                        classif_map[position[0] + patch_shape[0]//2, position[1] + patch_shape[1]//2, position[2] + patch_shape[2]//2] = pos
+                    nb_neighbors_per_brain += len(neighbors_label)
 
-                        #pos_color = np.array([0., 1., 0.], dtype=np.float32)
-                        #neg_color = np.array([0., 0., 1.], dtype=np.float32)
-                        #color = pos * pos_color + neg * neg_color
-                        #classif_map[position[0] + patch_shape[0]//2, position[1] + patch_shape[1]//2, position[2] + patch_shape[2]//2, :] = color[:]
+                    # Assume binary classification for now
+                    nb_pos = np.sum(neighbors_label, dtype=np.float64)
+                    nb_neg = len(neighbors_label) - nb_pos
+
+                    pos = nb_pos * ratio_neg
+                    neg = nb_neg * ratio_pos
+                    m = (pos-neg) / len(neighbors_label)
+                    if m > 0:
+                        m /= ratio_neg
+                    else:
+                        m /= ratio_pos
+
+                    classif_map[pixel_pos] = (m+1)/2. + OFFSET
+                    parkinson_prob_map[pixel_pos] = nb_pos/len(neighbors_label) + OFFSET
 
                 print "Brain #{0} ({3:,} patches) found {1:,} neighbors in {2:.2f} sec.".format(brain_id, nb_neighbors_per_brain, time.time()-start_brain, len(patches))
                 print "Patches with no neighbors: {:,}".format(nb_empty)
-                #plt.imshow(classif_map[:, 25, :, :], interpolation="nearest")
-                #plt.imshow(classif_map[:, 25, :], interpolation="nearest")
-                #plt.show()
 
-                save_nifti(image, affine, "T1_{}.nii.gz".format(brain_id))
-                save_nifti(classif_map, affine, "classif_{}.nii.gz".format(brain_id))
+                RESULTS_FOLDERS = './results'
+                if not os.path.isdir(RESULTS_FOLDERS):
+                    os.mkdir(RESULTS_FOLDERS)
+
+                def generate_name(prefix, dataset_name, brain_id, dbname, k):
+                    if prefix != "":
+                        return "{}_data-{}-{}_db-{}_kNN-{}".format(prefix, dataset_name, brain_id, dbname, k)
+                    else:
+                        return "data-{}-{}_db-{}_kNN-{}".format(dataset_name, brain_id, dbname, k)
+
+                name = generate_name(prefix=args.prefix, dataset_name=brain_data.name, brain_id=brain_id, dbname=brain_db.name, k=args.k)
+
+                save_nifti(brain.image, brain.infos['affine'], pjoin(RESULTS_FOLDERS, "{}_{}.nii.gz".format(brain_data.name, brain_id)))
+                save_nifti(classif_map, brain.infos['affine'], pjoin(RESULTS_FOLDERS, "classif_{}.nii.gz".format(name)))
+                save_nifti(parkinson_prob_map, brain.infos['affine'], pjoin(RESULTS_FOLDERS, "parkinson_prob_map_{}.nii.gz".format(name)))
+
+                from ipdb import set_trace as dbg
+                dbg()
+
+        # else:
+        #     brain_db.engine.distance = EuclideanDistance(brain_db.metadata['patch'])
+        #     brain_db.engine.filters = [NearestFilter(args.k)]
+        #     #brain_db.engine.filters = [DistanceThresholdFilter(10)]
+
+        #     start = time.time()
+        #     for brain_id, brain in enumerate(brain_data):
+        #         #image, affine = brain.resample(args.resampling_factor)
+        #         #patches, positions = get_patches(image, patch_shape=patch_shape, min_nonempty=args.min_nonempty)
+        #         patches, positions = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty, with_positions=True)
+
+        #         # Fetch only buckets that are unique
+        #         lshash = brain_db.engine.lshashes[0]
+        #         bucketkeys = lshash.hash_vector(patches)
+        #         bucketkeys, indices = np.unique(bucketkeys, return_inverse=True)
+
+        #         counts = brain_db.engine.storage.count(bucketkeys)
+        #         counts = brain_db.engine.candidate_count_batch(patches)
+        #         idxmax = np.argmax(counts)
+
+        #         from ipdb import set_trace as dbg
+        #         dbg()
+
+        #         classif_map = np.zeros_like(brain.image, dtype=np.float32)
+        #         start_brain = time.time()
+        #         nb_neighbors_per_brain = 0
+        #         nb_empty = 0
+
+        #         for chunk_patches, chunk_positions in izip(chunk(patches, n=1000), chunk(positions, n=1000)):
+
+        #             neighbors = brain_db.get_neighbors(chunk_patches, attributes=["label", "position"])
+        #             for id_patch, (patch, position, neighbors_label, neighbors_position) in enumerate(izip(chunk_patches, chunk_positions, neighbors['label'], neighbors['position'])):
+
+        #                 pixel_pos = position[0] + patch_shape[0]//2, position[1] + patch_shape[1]//2, position[2] + patch_shape[2]//2
+
+        #                 #neighbors_indices = np.sum(abs(neighbors_position - position) <= 5, axis=1) == len(position)
+        #                 #neighbors_label = neighbors_label[neighbors_indices]
+
+        #                 if len(neighbors_position) == 0:
+        #                     nb_empty += 1
+        #                     classif_map[pixel_pos] = 0.6
+        #                     continue
+
+        #                 nb_neighbors_per_brain += len(neighbors_label)
+
+        #                 # Assume binary classification for now
+        #                 nb_pos = np.sum(neighbors_label, dtype=np.float64)
+        #                 nb_neg = len(neighbors_label) - nb_pos
+
+        #                 pos = nb_pos * ratio_neg
+        #                 neg = nb_neg * ratio_pos
+        #                 m = (pos-neg) / len(neighbors_label)
+        #                 if m > 0:
+        #                     m /= ratio_neg
+        #                 else:
+        #                     m /= ratio_pos
+
+        #                 classif_map[pixel_pos] = (m+1)/2. + 0.1
+
+        #         print "Brain #{0} ({3:,} patches) found {1:,} neighbors in {2:.2f} sec.".format(brain_id, nb_neighbors_per_brain, time.time()-start_brain, len(patches))
+        #         print "Patches with no neighbors: {:,}".format(nb_empty)
+
+        #         save_nifti(brain.image, brain.infos['affine'], "T1_{}.nii.gz".format(brain_id))
+        #         save_nifti(classif_map, brain.infos['affine'], "classif_{}.nii.gz".format(brain_id))
 
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-# def get_data_for_query(config, patch_shape=None):
-#     for source in config["sources"]:
-#         if source["type"] == "file":
-#             infos = np.load(source["path"])
-#             if patch_shape is not None and tuple(source["shape"]) != patch_shape:
-#                 for idx, (datum, target) in enumerate(izip(infos["data"], infos["targets"])):
-#                     for block, pos in blockify(datum, patch_shape, keep_empty=False):
-#                         yield block.flatten()
-#             else:
-#                 for idx, (datum, target) in enumerate(izip(infos["data"], infos["targets"])):
-#                     yield datum.flatten()
-
-
-# def get_data(config, patch_shape=None):
-#     for source in config["sources"]:
-#         if source["type"] == "file":
-#             infos = np.load(source["path"])
-#             if patch_shape is not None and tuple(source["shape"]) != patch_shape:
-#                 for idx, (datum, target) in enumerate(izip(infos["data"], infos["targets"])):
-#                     for block, pos in blockify(datum, patch_shape, keep_empty=False):
-#                         datum_info = {"id": idx,
-#                                       "target": target.tolist(),
-#                                       "position": pos.tolist()}
-#                         yield block.flatten(), datum_info
-#             else:
-#                 for idx, (datum, target) in enumerate(itertools.izip(infos["data"], infos["targets"])):
-#                     datum_info = {"id": idx,
-#                                   "target": target.tolist(),
-#                                   "position": (0, 0)}
-#                     yield datum.flatten(), datum_info

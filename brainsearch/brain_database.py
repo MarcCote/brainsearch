@@ -12,6 +12,8 @@ from nearpy.data import NumpyData
 
 from collections import defaultdict
 
+NO_DATABASE = 0
+
 
 class BrainDatabase(object):
     def __init__(self, name, redis, engine):
@@ -61,10 +63,44 @@ class BrainDatabase(object):
         from brainsearch import vizu
         indices = np.argsort(sizes)[::-1]
 
+        #all_distances = []
+        means = []
+        stds = []
+
+        nb_samples = 1000
+        rng = np.random.RandomState(42)
+
         for idx in indices:
             print "{:,} neighbors".format(sizes[idx])
-            patches = self.engine.storage.retrieve_by_key(bucketkeys[idx], attribute=self.metadata['patch'])
-            vizu.show_images3d(patches, shape=self.metadata['patch'].shape, blocking=True)
+            from ipdb import set_trace as dbg
+            dbg()
+            patches = self.engine.storage.retrieve([bucketkeys[idx]], attribute=self.metadata['patch'])[0]
+            labels = self.engine.storage.retrieve([bucketkeys[idx]], attribute=self.metadata['label'])[0]
+            energies = np.sqrt(np.sum(patches**2, axis=tuple(range(1, patches.ndim))))
+
+            indices = rng.randint(0, len(patches), 2*nb_samples)
+            distances = np.sqrt(np.sum((patches[indices[1::2]] - patches[indices[::2]])**2, axis=tuple(range(1, patches.ndim))))
+
+            #all_distances.append(distances)
+            means.append(np.mean(distances))
+            stds.append(np.std(distances))
+
+            #import pylab as plt
+            #plt.hist(distances, bins=100)
+            #plt.show()
+
+            #print "0:{:,}, 1:{:,}".format(*np.bincount(labels.flatten()))
+            #import pylab as plt
+            #plt.hist(energies, bins=100)
+            #plt.show()
+            #vizu.show_images3d(patches, shape=self.metadata['patch'].shape, blocking=True)
+
+        import pylab as plt
+        plt.plot(means)
+        plt.plot(stds)
+        #plt.figure()
+        #plt.hist(all_distances, bins=100)
+        plt.show()
 
     def labels_count(self, check_integrity=False):
         labels_count = list(self.redis.hscan_iter(self.name, match="label_count_*", count=2))
@@ -73,7 +109,9 @@ class BrainDatabase(object):
             labels_count = map(int, zip(*labels_count)[1])
 
         if check_integrity:
-            true_labels_count = self.engine.targets_count()
+            bucketkeys = self.engine.storage.bucketkeys()
+            labels = self.engine.storage.retrieve_all(bucketkeys, attribute=self.metadata['label'])
+            true_labels_count = np.bincount(labels.flatten())
             if np.any(true_labels_count != labels_count):
                 updated_labels_count = true_labels_count.copy()
                 updated_labels_count[:len(labels_count)] -= labels_count
@@ -104,6 +142,8 @@ class BrainDatabase(object):
         for i, attribute in enumerate(attributes):
             attributes[i] = self.metadata[attribute]
 
+        #return self.engine.neighbors_batch_extended(patches, *attributes)
+
         return self.engine.neighbors_batch(patches, *attributes)
 
     def update(self, nb_patches=None, labels_count=None):
@@ -129,15 +169,14 @@ class BrainDatabaseManager(object):
     DATABASES_LIST_KEY = "BRAIN_DB"
 
     def __init__(self, host='localhost', port=6379):
-        self.redis = Redis(host=host, port=port, db=0)
+        self.redis = Redis(host=host, port=port, db=NO_DATABASE)
         self.brain_databases = {}
 
         #Retrieves existing brain databases
-        #redis_storage = RedisStorage(self.redis)
-        redis_storage = CRedisStorage(host=host, port=port)
         names = self.redis.lrange(BrainDatabaseManager.DATABASES_LIST_KEY, 0, -1)
         for name in names:
             lhash = pickle.loads(self.redis.hget(name, "hashing_config"))
+            redis_storage = CRedisStorage(host=host, port=port, db=NO_DATABASE, keyprefix=lhash.name)
 
             engine = Engine(lshashes=[lhash], storage=redis_storage)
             brain_database = BrainDatabase(name, self.redis, engine)
@@ -158,9 +197,9 @@ class BrainDatabaseManager(object):
         self.redis.hset(name, "label_count_1", 0)
 
         # Save information about hashing function
-        lhash.hash_name = name + "_" + lhash.hash_name
+        lhash.name = name + "_" + lhash.name
         self.redis.hset(name, "hashing_config", pickle.dumps(lhash))
-        self.redis.hset(name, "hashing_name", lhash.hash_name)
+        self.redis.hset(name, "hashing_name", lhash.name)
 
         # Add new DB to the list of all DBs
         self.redis.rpush(BrainDatabaseManager.DATABASES_LIST_KEY, name)
@@ -178,15 +217,16 @@ class BrainDatabaseManager(object):
 
         return brain_database
 
-    def remove_brain_database(self, brain_database):
+    def remove_brain_database(self, brain_database, full=False):
         brain_database.engine.clean_all_buckets()
-        self.redis.delete(brain_database.name)
-        self.redis.delete(brain_database.name + "_metadata")
-        self.redis.lrem(BrainDatabaseManager.DATABASES_LIST_KEY, brain_database.name)
+        if full:
+            self.redis.delete(brain_database.name)
+            self.redis.delete(brain_database.name + "_metadata")
+            self.redis.lrem(BrainDatabaseManager.DATABASES_LIST_KEY, brain_database.name)
 
-    def remove_all_brain_databases(self):
+    def remove_all_brain_databases(self, full=False):
         for brain_db in self.brain_databases.values():
-            self.remove_brain_database(brain_db)
+            self.remove_brain_database(brain_db, full)
 
     def __contains__(self, name):
         return name in self.brain_databases

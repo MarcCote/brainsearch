@@ -2,37 +2,52 @@ import nibabel as nib
 import numpy as np
 from itertools import izip_longest
 
-from dipy.align.aniso2iso import resample
+from brainsearch.imagespeed import blockify
+from brainsearch.brain_processing import BrainPipelineProcessing
 
 
-def brain_data_factory(config, skip=0):
+def brain_data_factory(config, skip=0, pipeline=BrainPipelineProcessing()):
     name = config["name"]
     sources = config["sources"]
     if config["type"] == "numpy":
-        return NumpyBrainData(name=name, sources=sources, skip=skip)
+        return NumpyBrainData(name=name, sources=sources, skip=skip, pipeline=pipeline)
     elif config["type"] == "nifti":
-        return NiftiBrainData(name=name, sources=sources, skip=skip)
+        return NiftiBrainData(name=name, sources=sources, skip=skip, pipeline=pipeline)
 
 
 class Brain(object):
-    def __init__(self, image, label, affine, pixeldim):
+    def __init__(self, image, id, label, **infos):
         self.image = image
+        self.id = id
         self.label = label
-        self.affine = affine
-        self.pixeldim = pixeldim
+        self.infos = infos
 
-    def resample(self, resampling_factor, order=1):
-        #orders = {'nn': 0, 'lin': 1, 'quad': 2, 'cubic': 3}
-        new_pixeldim = tuple(resampling_factor * np.asarray(self.pixeldim))
-        rimage, raffine = resample(self.image, self.affine, self.pixeldim, new_pixeldim, order=order)
-        return rimage, raffine
+    def extract_patches(self, patch_shape, min_nonempty=None, with_info=False, with_positions=False):
+        patches, positions = blockify(self.image, patch_shape, min_nonempty=min_nonempty)
+
+        if not with_info:
+            if with_positions:
+                return patches, positions
+
+            return patches
+
+        nb_patches = len(patches)
+        infos = {"id": np.ones(nb_patches, dtype=np.int32) * self.id,
+                 "label": np.ones(nb_patches, dtype=np.int8) * self.label,
+                 "position": positions}
+
+        return patches, infos
 
 
 class BrainData(object):
-    def __init__(self, name, sources, skip=0):
+    def __init__(self, name, sources, skip=0, pipeline=BrainPipelineProcessing()):
         self.name = name
         self.sources = sources
         self.skip = skip
+        self.pipeline = pipeline
+
+    def __len__(self):
+        return len(self.sources) - self.skip
 
     def __iter__(self):
         raise NotImplementedError
@@ -51,8 +66,11 @@ class NiftiBrainData(BrainData):
             img = nib.load(source['path'])
             brain = img.get_data()
 
-            yield Brain(image=np.asarray(brain, dtype=np.float32), label=np.int8(label),
-                        affine=img.get_affine(), pixeldim=img.get_header().get_zooms()[:3])
+            brain = Brain(image=np.asarray(brain, dtype=np.float32), id=i, label=np.int8(label),
+                          affine=img.get_affine(), pixeldim=img.get_header().get_zooms()[:3])
+
+            self.pipeline.process(brain)
+            yield brain
 
 
 class NumpyBrainData(BrainData):

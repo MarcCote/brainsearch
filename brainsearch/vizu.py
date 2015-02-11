@@ -12,10 +12,10 @@ def middle_divisors(n):
     return middle_divisors(n+1)  # If prime number take next one
 
 
-def ratio_8_9(N):
-    height = int(np.ceil(np.sqrt(9./8. * N)))
-    width = int(np.ceil(float(N)/height))
-    return height, width
+def resolution(N, numerator=16, divisor=9):
+    width = int(np.ceil(np.sqrt(16./9. * N)))
+    height = int(np.ceil(float(N)/width))
+    return width, height
 
 
 def show_image(pixels, width, height, cmap=plt.cm.gray, scale=1, blocking=False):
@@ -26,7 +26,7 @@ def show_image(pixels, width, height, cmap=plt.cm.gray, scale=1, blocking=False)
 
 def show_images2d(list_of_pixels, shape, cmap=plt.cm.gray, scale=1, blocking=False):
     height, width = shape
-    nrows, ncols = middle_divisors(len(list_of_pixels))
+    ncols, nrows = resolution(len(list_of_pixels))
 
     image = scale/2. * np.ones((nrows * (height+1) - 1, ncols * (width+1) - 1), dtype=float)
     for pixels, (row, col) in izip(list_of_pixels, product(range(nrows), range(ncols))):
@@ -34,12 +34,13 @@ def show_images2d(list_of_pixels, shape, cmap=plt.cm.gray, scale=1, blocking=Fal
         image[row*(height+1):(row+1)*(height+1)-1, col*(width+1):(col+1)*(width+1)-1] = pixels
 
     plt.imshow(scale*image, interpolation="nearest", cmap=cmap)
+    plt.subplots_adjust(left=0., right=1., top=0.95, bottom=0.05)
     plt.show(blocking)
 
 
 def show_images3d(list_of_pixels, shape, cmap=plt.cm.gray, scale=1, blocking=False):
     height, width, depth = shape
-    nrows, ncols = ratio_8_9(len(list_of_pixels))
+    ncols, nrows = resolution(len(list_of_pixels))
 
     for d in range(depth):
         plt.figure(d)
@@ -50,6 +51,7 @@ def show_images3d(list_of_pixels, shape, cmap=plt.cm.gray, scale=1, blocking=Fal
 
         plt.imshow(scale*image, interpolation="nearest", cmap=cmap)
 
+    plt.subplots_adjust(left=0., right=1., top=0.95, bottom=0.05)
     plt.show(blocking)
 
 

@@ -10,8 +10,8 @@ from time import time
 from brainsearch.imagespeed import blockify
 from brainsearch.brain_data import brain_data_factory
 
-import theano
-import theano.tensor as T
+#import theano
+#import theano.tensor as T
 from os.path import join as pjoin
 
 
@@ -113,7 +113,7 @@ def main():
     image = nii.get_data()
     patches, positions = blockify(image, args.shape, min_nonempty=args.min_nonempty)
 
-    if args.batch_id is None:
+    if args.batch_id is not None:
         start = args.batch_id * args.batch_size
         end = (args.batch_id+1) * args.batch_size
         patches = patches[start:end]

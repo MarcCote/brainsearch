@@ -102,6 +102,8 @@ def buildArgsParser():
     p.add_argument('--batch_size', type=int, help='Number of query patches in a batch.', default=1)
     p.add_argument('--out', type=str, help='Directory where to save intermediate results.', default='./')
 
+    p.add_argument('-x', action="store_true", help='Print smart_dispatch command to launch and quit.')
+
     return p
 
 
@@ -113,9 +115,21 @@ def main():
     image = nii.get_data()
     patches, positions = blockify(image, args.shape, min_nonempty=args.min_nonempty)
 
+    brain_data = brain_data_factory(json.load(open(args.dataset)))
+
+    if args.x:
+        nb_batches = int(np.ceil(len(patches) / args.batch_size))
+        print ("\nsmart_dispatch.py -q qwork@mp2 --pool {} launch "
+               "run_full_knn.py {} {} --brain_id [0:{}] --batch_id [0:{}] --batch_size {}"
+               ).format(nb_batches*len(brain_data), args.query, args.dataset,
+                        nb_batches, len(brain_data), args.batch_size)
+        return
+
     if args.batch_id is not None:
         start = args.batch_id * args.batch_size
         end = (args.batch_id+1) * args.batch_size
+
+        print "Will process patches #{}-{}".format(start, end-1)
         patches = patches[start:end]
 
     best_distances = np.empty((len(patches), args.k), dtype="float32")
@@ -124,22 +138,17 @@ def main():
     best_positions = np.empty((len(patches), args.k, 3), dtype="int32")
     best = best_distances, best_labels, best_ids, best_positions
 
-    brain_data = brain_data_factory(json.load(open(args.dataset)))
-
-    for brain in brain_data:
-        if args.brain_id != brain.id:
+    for i, brain in enumerate(brain_data):
+        if args.brain_id is not None and args.brain_id != i:
             continue
 
-        print "Processing brain #{} ...".format(brain.id)
+        print "Processing brain #{} ...".format(i)
         start = time()
         find_kNN(patches, best, args.k, brain, args.shape, args.min_nonempty)
-        print "Brain #{}, done in {:.2f} sec".format(brain.id, time()-start)
+        print "Brain #{}, done in {:.2f} sec".format(i, time()-start)
 
     name = "{batch_id}_{brain_id}.npz".format(batch_id=args.batch_id, brain_id=args.brain_id)
     np.savez(pjoin(args.out, name), dist=best_distances, labels=best_labels, ids=best_ids, positions=best_positions)
-
-    import pickle
-    pickle.dump(best, open('full_knn.pkl', 'w'))
 
 if __name__ == '__main__':
     main()

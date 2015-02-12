@@ -67,6 +67,9 @@ def find_kNN(query_patches, best, k, brain, patch_shape, min_nonempty):
     patches, datainfo = brain.extract_patches(patch_shape, min_nonempty=min_nonempty, with_info=True)
 
     for i, query_patch in enumerate(query_patches):
+        if i % 1000 == 0:
+            print "{}/{}".format(i, len(query_patches))
+
         distances = np.sum((patches - query_patch)**2, axis=(1, 2, 3))
         top_k = np.argsort(distances)[:k]
 
@@ -122,7 +125,7 @@ def main():
         print ("\nsmart_dispatch.py -q qwork@mp2 --pool {} launch "
                "run_full_knn.py {} {} --brain_id [0:{}] --batch_id [0:{}] --batch_size {}"
                ).format(nb_batches*len(brain_data), args.query, args.dataset,
-                        nb_batches, len(brain_data), args.batch_size)
+                        len(brain_data), nb_batches, args.batch_size)
         return
 
     if args.batch_id is not None:

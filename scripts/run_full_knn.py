@@ -63,12 +63,13 @@ def find_kNN_theano(query_patches, best, k, brain, patch_shape, min_nonempty):
         """
 
 
-def find_kNN(query_patches, best, k, brain, patch_shape, min_nonempty):
+def find_kNN(query_patches, best, k, brain, patch_shape, min_nonempty, filename):
     patches, datainfo = brain.extract_patches(patch_shape, min_nonempty=min_nonempty, with_info=True)
 
     for i, query_patch in enumerate(query_patches):
         if i % 1000 == 0:
             print "{}/{}".format(i, len(query_patches))
+            np.savez(filename + '.part', part=np.array(i), dist=best[0], labels=best[1], ids=best[2], positions=best[3])
 
         distances = np.sum((patches - query_patch)**2, axis=(1, 2, 3))
         top_k = np.argsort(distances)[:k]
@@ -141,17 +142,19 @@ def main():
     best_positions = np.empty((len(patches), args.k, 3), dtype="int32")
     best = best_distances, best_labels, best_ids, best_positions
 
+    name = "{batch_id}_{brain_id}.npz".format(batch_id=args.batch_id, brain_id=args.brain_id)
+    filename = pjoin(args.out, name)
+
     for i, brain in enumerate(brain_data):
         if args.brain_id is not None and args.brain_id != i:
             continue
 
         print "Processing brain #{} ...".format(i)
         start = time()
-        find_kNN(patches, best, args.k, brain, args.shape, args.min_nonempty)
+        find_kNN(patches, best, args.k, brain, args.shape, args.min_nonempty, filename)
         print "Brain #{}, done in {:.2f} sec".format(i, time()-start)
 
-    name = "{batch_id}_{brain_id}.npz".format(batch_id=args.batch_id, brain_id=args.brain_id)
-    np.savez(pjoin(args.out, name), dist=best_distances, labels=best_labels, ids=best_ids, positions=best_positions)
+    np.savez(filename, dist=best_distances, labels=best_labels, ids=best_ids, positions=best_positions)
 
 if __name__ == '__main__':
     main()

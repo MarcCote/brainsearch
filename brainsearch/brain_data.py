@@ -1,3 +1,4 @@
+import os
 import nibabel as nib
 import numpy as np
 from itertools import izip_longest
@@ -16,9 +17,10 @@ def brain_data_factory(config, skip=0, pipeline=BrainPipelineProcessing()):
 
 
 class Brain(object):
-    def __init__(self, image, id, label, **infos):
+    def __init__(self, image, id, name, label, **infos):
         self.image = image
         self.id = id
+        self.name = name
         self.label = label
         self.infos = infos
 
@@ -62,11 +64,14 @@ class NiftiBrainData(BrainData):
             if i < self.skip:
                 continue
 
+            name = source['name'] if 'name' in source else os.path.basename(source['path']).split(".nii")[0]
+            id = source['id'] if 'id' in source else i
+
             label = source['label']
             img = nib.load(source['path'])
             brain = img.get_data()
 
-            brain = Brain(image=np.asarray(brain, dtype=np.float32), id=i, label=np.int8(label),
+            brain = Brain(image=np.asarray(brain, dtype=np.float32), id=id, name=name, label=np.int8(label),
                           affine=img.get_affine(), pixeldim=img.get_header().get_zooms()[:3])
 
             self.pipeline.process(brain)

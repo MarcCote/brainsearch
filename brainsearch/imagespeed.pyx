@@ -85,7 +85,7 @@ cdef int _blockify2D_nonempty(Data2D arr, Shape shape, int min_nonempty, Data3D 
                     pos[n,0] = y
                     pos[n,1] = x
 
-            if nb_empty > min_nonempty:
+            if nb_empty >= min_nonempty:
                 n += 1
 
     return n
@@ -111,7 +111,7 @@ cdef int _blockify3D_nonempty(Data3D arr, Shape shape, int min_nonempty, Data4D 
                             pos[n,1] = y
                             pos[n,2] = x
 
-                if nb_empty > min_nonempty:
+                if nb_empty >= min_nonempty:
                     n += 1
 
     return n
@@ -125,9 +125,18 @@ def blockify(arr, shape, min_nonempty=None):
     arr : 2d or 3d array
         Array to split in blocks.
     shape : tuple
-        Shape of the block to extract.
+        Shape of the blocks to extract.
     min_nonempty : int, optional
-        Tells
+        Only keep blocks having at least `min_nonempty` cells not 0.
+
+    Returns
+    -------
+    ndarray
+        blocks extracted from `arr`. The array will have a dimension of
+        (nb_blocks, `*shape`) where nb_blocks will vary in function of `min_nonempty`.
+    ndarray
+        positions of the top-left corner of the blocks. The array will have a dimension of
+        (nb_blocks, `arr.ndim`) where nb_blocks will vary in function of `min_nonempty`.
     """
     if min_nonempty is None:
         block_shape = np.asarray(shape, dtype=np.int32)

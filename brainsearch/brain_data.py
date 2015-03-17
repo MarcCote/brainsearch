@@ -72,7 +72,8 @@ class NiftiBrainData(BrainData):
             brain = img.get_data()
 
             brain = Brain(image=np.asarray(brain, dtype=np.float32), id=id, name=name, label=np.int8(label),
-                          affine=img.get_affine(), pixeldim=img.get_header().get_zooms()[:3])
+                          affine=img.get_affine(), pixeldim=img.get_header().get_zooms()[:3],
+                          img_shape=img.shape)
 
             self.pipeline.process(brain)
             yield brain

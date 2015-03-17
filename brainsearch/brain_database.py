@@ -300,7 +300,8 @@ class NewBrainDatabase(object):
 
     def show_large_buckets(self, sizes, bucketkeys):
         from brainsearch import vizu
-        indices = np.argsort(sizes)[::-1]
+        #indices = np.argsort(sizes)[::-1]
+        indices = range(len(sizes))
 
         #all_distances = []
         means = []
@@ -322,6 +323,9 @@ class NewBrainDatabase(object):
             means.append(np.mean(distances))
             stds.append(np.std(distances))
 
+            print means[-1]
+            print stds[-1]
+
             #import pylab as plt
             #plt.hist(distances, bins=100)
             #plt.show()
@@ -330,6 +334,8 @@ class NewBrainDatabase(object):
             #import pylab as plt
             #plt.hist(energies, bins=100)
             #plt.show()
+            from ipdb import set_trace as dbg
+            dbg()
             #vizu.show_images3d(patches, shape=self.metadata['patch'].shape, blocking=True)
 
         import pylab as plt

@@ -87,7 +87,6 @@ def build_subcommand_add(subparser):
 
     p.add_argument('name', type=str, help='name of the brain database')
     p.add_argument('config', type=str, help='contained in a JSON file')
-    p.add_argument('--use_spatial_code', action='store_true', help='include spatial position of a patch in hashcode')
 
 
 def build_subcommand_eval(subparser):
@@ -149,6 +148,7 @@ def buildArgsParser():
 
     p.add_argument('--storage', type=str, default="redis", help='which storage to use: redis, memory, file')
 
+    p.add_argument('--use_spatial_code', action='store_true', help='include spatial position of a patch in hashcode')
     p.add_argument('-m', dest="min_nonempty", type=int, help='consider only patches having this minimum number of non-empty voxels')
     p.add_argument('--skip', metavar="N", type=int, help='skip N images', default=0)
     p.add_argument('-r', dest="resampling_factor", type=float, help='resample image before processing', default=1.)
@@ -275,15 +275,26 @@ def main(brain_manager=None):
             brain_data = brain_data_factory(config, pipeline=pipeline)
             for brain_id, brain in enumerate(brain_data):
                 print "ID: {0}/{1}".format(brain_id, len(brain_data))
-                #if brain_id == 10: break  # TODO remove
-                patches = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty)
-                yield patches.reshape((-1, np.prod(patch_shape)))
+                if brain_id == 10: break  # TODO remove
+                patches, positions = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty, with_positions=True)
+                patches = patches.reshape((-1, np.prod(patch_shape)))
+
+                if args.use_spatial_code:
+                    # Normalize position
+                    pos_normalized = positions / np.array(brain.infos['img_shape'], dtype="float32")
+                    patches = np.c_[pos_normalized, patches]
+
+                yield patches
+
+        dimension = np.prod(patch_shape)
+        if args.use_spatial_code:
+            dimension += len(patch_shape)
 
         hashes = []
         if args.SH is not None:
             for nbits in args.SH:
                 hash_name = "SH{nbits}".format(nbits=nbits)
-                hashes.append(SpectralHashing(hash_name, nbits=nbits, dimension=np.prod(patch_shape),
+                hashes.append(SpectralHashing(hash_name, nbits=nbits, dimension=dimension,
                                               trainset=_get_all_patches,
                                               pkl=args.pkl, bounds=args.bounds))
 
@@ -296,7 +307,7 @@ def main(brain_manager=None):
             for nbits in args.PCA:
                 hash_name = "PCA{nbits}".format(nbits=nbits)
                 hashes.append(PCABinaryProjections(hash_name, dimension=np.prod(patch_shape),
-                              trainset=_get_all_patches, nbits=nbits))
+                              trainset=_get_all_patches, nbits=nbits, pkl=args.pkl))
 
         if args.LSH is not None:
             for nb_projections in args.LSH:
@@ -336,9 +347,18 @@ def main(brain_manager=None):
             print "extracting: {:.2f}".format(time.time()-start_extracting)
 
             if args.use_spatial_code:
-                hashkeys = brain_db.insert_with_pos(patches, datainfo["label"], datainfo["position"], datainfo["id"])
-            else:
-                hashkeys = brain_db.insert(patches, datainfo["label"], datainfo["position"], datainfo["id"])
+                # Normalize position
+                pos_normalized = datainfo["position"] / np.array(brain.infos['img_shape'], dtype="float32")
+                pos_normalized = pos_normalized.astype("float32")
+                patches = patches.reshape((-1, np.prod(patch_shape)))
+                patches = np.c_[pos_normalized, patches]
+
+            hashkeys = brain_db.insert(patches, datainfo["label"], datainfo["position"], datainfo["id"])
+
+            # if args.use_spatial_code:
+            #     hashkeys = brain_db.insert_with_pos(patches, datainfo["label"], datainfo["position"], datainfo["id"])
+            # else:
+            #     hashkeys = brain_db.insert(patches, datainfo["label"], datainfo["position"], datainfo["id"])
 
             print "ID: {0} (label:{3}), {1:,} patches in {2:.2f} sec.".format(brain_id, len(hashkeys), time.time()-start_brain, brain.label)
             nb_elements_total += len(hashkeys)

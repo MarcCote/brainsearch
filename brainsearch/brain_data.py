@@ -34,9 +34,10 @@ class Brain(object):
             return patches
 
         nb_patches = len(patches)
-        infos = {"id": np.ones(nb_patches, dtype=np.int32) * self.id,
-                 "label": np.ones(nb_patches, dtype=np.int8) * self.label,
-                 "position": positions}
+        infos = {"patch": patches,
+                 "position": positions,
+                 "id": np.ones(nb_patches, dtype=np.int32) * self.id,
+                 "label": np.ones(nb_patches, dtype=np.int8) * self.label}
 
         return patches, infos
 

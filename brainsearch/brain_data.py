@@ -25,7 +25,10 @@ class Brain(object):
         self.infos = infos
 
     def extract_patches(self, patch_shape, min_nonempty=None, with_info=False, with_positions=False):
-        patches, positions = blockify(self.image, patch_shape, min_nonempty=min_nonempty)
+        if min_nonempty > np.prod(patch_shape):
+            raise ValueError("min_nonempty must be smaller than nb. of voxels in a patch!")
+
+        patches, positions = blockify(self.image, patch_shape, min_nonempty_ratio=min_nonempty)
 
         if not with_info:
             if with_positions:

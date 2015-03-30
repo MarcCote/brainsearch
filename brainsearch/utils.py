@@ -1,6 +1,8 @@
 import operator
 import itertools
 
+from nearpy.utils import Timer
+
 
 def split(iterable, n=2):
     tees = itertools.tee(iterable, n)

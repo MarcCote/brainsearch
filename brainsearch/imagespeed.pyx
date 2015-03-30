@@ -117,7 +117,7 @@ cdef int _blockify3D_nonempty(Data3D arr, Shape shape, int min_nonempty, Data4D 
     return n
 
 
-def blockify(arr, shape, min_nonempty=None):
+def blockify(arr, shape, min_nonempty_ratio=0.):
     """ Split a ndarray `arr` into overlapping blocks of size `shape`.
 
     Parameters
@@ -126,8 +126,12 @@ def blockify(arr, shape, min_nonempty=None):
         Array to split in blocks.
     shape : tuple
         Shape of the blocks to extract.
-    min_nonempty : int, optional
-        Only keep blocks having at least `min_nonempty` cells not 0.
+    min_nonempty_ratio : float [0,1] (optional)
+        Only keep blocks having at least a ratio of `min_nonempty_ratio` of
+        nonempty cells (i.e. not 0). Minimum number of nonempty cells is
+        obtained by taking the ceiling of `min_nonempty_ratio` * `shape`. The
+        only way to completely empty blocks is by setting `min_nonempty_ratio`
+        to 0.
 
     Returns
     -------
@@ -138,7 +142,12 @@ def blockify(arr, shape, min_nonempty=None):
         positions of the top-left corner of the blocks. The array will have a dimension of
         (nb_blocks, `arr.ndim`) where nb_blocks will vary in function of `min_nonempty`.
     """
-    if min_nonempty is None:
+    if min_nonempty_ratio < 0. or min_nonempty_ratio > 1.:
+        raise ValueError("`min_nonempty_ratio` must be between 0 and 1 included!")
+
+    min_nonempty = int(np.ceil(min_nonempty_ratio * np.prod(shape)))
+
+    if min_nonempty == 0:
         block_shape = np.asarray(shape, dtype=np.int32)
         nb_blocks = np.prod(np.array(arr.shape) - block_shape + 1)
         blocks = np.empty((nb_blocks,) + shape, dtype=np.float32)

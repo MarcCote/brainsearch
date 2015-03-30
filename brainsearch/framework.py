@@ -201,17 +201,25 @@ def check(brain_manager, name, use_spatial_code=False):
     with Timer('Counting'):
         sizes, bucketkeys = brain_db.buckets_size()
 
-    print "Counted {2:,} candidates for {0:,} buckets".format(len(sizes), sum(sizes))
+    print "Counted {1:,} candidates for {0:,} buckets".format(len(sizes), sum(sizes))
     print "Avg. candidates per bucket: {0:.2f}".format(np.mean(sizes))
     print "Std. candidates per bucket: {0:.2f}".format(np.std(sizes))
     print "Min. candidates per bucket: {0:,}".format(np.min(sizes))
     print "Max. candidates per bucket: {0:,}".format(np.max(sizes))
 
     plt.hist(sizes, bins=np.logspace(0, np.log10(np.max(sizes))), log=True)
+    plt.xlabel('Bucket sizes')
+    plt.ylabel('Count')
     plt.xscale('log')
-    plt.show()
+    #plt.show()
 
-    brain_db.show_large_buckets(sizes, bucketkeys, use_spatial_code)
+    FIGURES_FOLDER = './figs'
+    if not os.path.isdir(FIGURES_FOLDER):
+        os.mkdir(FIGURES_FOLDER)
+
+    plt.savefig(pjoin(FIGURES_FOLDER, name), bbox_inches='tight')
+
+    #brain_db.show_large_buckets(sizes, bucketkeys, use_spatial_code)
 
 
 # def eval():

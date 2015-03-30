@@ -110,7 +110,7 @@ def build_subcommand_check(subparser):
                              help=DESCRIPTION,
                              formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    p.add_argument('name', type=str, nargs='*', help='name of the brain database')
+    p.add_argument('names', type=str, nargs='*', help='name of the brain database')
     #p.add_argument('-m', dest="min_nonempty", type=int, help='consider only patches having this minimum number of non-empty voxels')
 
 
@@ -215,8 +215,9 @@ def main(brain_manager=None):
                       use_spatial_code=args.use_spatial_code)
 
     elif args.command == "check":
-        framework.check(brain_manager, args.name,
-                        use_spatial_code=args.use_spatial_code)
+        for name in args.names:
+            framework.check(brain_manager, name,
+                            use_spatial_code=args.use_spatial_code)
 
     return brain_manager
 

@@ -119,6 +119,7 @@ def buildArgsParser():
     p = argparse.ArgumentParser(description=DESCRIPTION)
 
     p.add_argument('--storage', type=str, default="redis", help='which storage to use: redis, memory, file')
+    p.add_argument('--dir', type=str, default="./", help='folder where to store brain databases (where applicable)')
 
     p.add_argument('--use_spatial_code', action='store_true', help='include spatial position of a patch in hashcode')
     p.add_argument('-m', dest="min_nonempty", type=float, help='consider only patches having this minimum percent of non-empty voxels')
@@ -142,7 +143,7 @@ def main(brain_manager=None):
     args = parser.parse_args()
 
     if brain_manager is None:
-        brain_manager = BrainDatabaseManager(args.storage)
+        brain_manager = BrainDatabaseManager(args.storage, dir=args.dir)
 
     # Build processing pipeline
     pipeline = BrainPipelineProcessing()

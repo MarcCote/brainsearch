@@ -161,8 +161,8 @@ def main(brain_manager=None):
         print "Creating brain database {}...".format(args.name)
         if args.name in brain_manager:
             print ("This database already exists. Please use command "
-                   "'brain_search.py --storage {} clear -f {}' before.".format(brain_manager.storage.name, args.name))
-            return
+                   "'bench_hashing.py --storage {} clear -f {}' before.".format(args.storage, args.name))
+            exit(-1)
 
         start = time.time()
         patch_shape = tuple(map(int, args.shape.split(",")))
@@ -171,7 +171,7 @@ def main(brain_manager=None):
             config = json.load(open(args.trainset))
             brain_data = brain_data_factory(config, pipeline=pipeline)
             for brain_id, brain in enumerate(brain_data):
-                print "ID: {0}/{1}".format(brain_id, len(brain_data))
+                #print "ID: {0}/{1}".format(brain_id, len(brain_data))
                 patches, positions = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty, with_positions=True)
                 vectors = patches.reshape((-1, np.prod(patch_shape)))
 
@@ -200,7 +200,7 @@ def main(brain_manager=None):
             hashtype, nbits = "LSH", args.LSH
         else:
             print "Must provide one of the following options: --SH, --LSH or --PCA"
-            return
+            exit(-1)
 
         hashing = framework.hashing_factory(hashtype, dimension, nbits, **hash_params)
         framework.init(brain_manager, args.name, patch_shape, hashing)
@@ -215,9 +215,17 @@ def main(brain_manager=None):
                       use_spatial_code=args.use_spatial_code)
 
     elif args.command == "check":
-        for name in args.names:
-            framework.check(brain_manager, name,
-                            use_spatial_code=args.use_spatial_code)
+        names = args.names
+        if len(args.names) == 0:
+            names = brain_manager.brain_databases
+
+        for name in names:
+            try:
+                print "\n" + name
+                framework.check(brain_manager, name,
+                                use_spatial_code=args.use_spatial_code)
+            except:
+                pass
 
     return brain_manager
 

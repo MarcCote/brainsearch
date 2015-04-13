@@ -233,6 +233,7 @@ def check(brain_manager, name, use_spatial_code=False):
     print "Std. spatial distance per bucket: {0:.2f}".format(np.std(avg_spatial_distances))
     print "Avg. of position std.: {}".format(np.mean(std_positions, axis=0))
 
+    plt.clf()
     plt.hist(sizes, bins=np.logspace(0, np.log10(np.max(sizes))), log=True)
     plt.xlabel('Bucket sizes')
     plt.ylabel('Count')

@@ -232,4 +232,9 @@ def main(brain_manager=None):
 
 
 if __name__ == '__main__':
-    db_manager = main()
+    try:
+        db_manager = main()
+    except:
+        import traceback
+        traceback.print_exc()
+        exit(-1)

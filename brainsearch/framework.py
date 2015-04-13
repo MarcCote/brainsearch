@@ -93,10 +93,10 @@ def list(brain_manager, name, verbose=False, check_integrity=False):
     if name in brain_manager:
         print_info(name, brain_manager[name])
     else:
-        print "Available brain databases: "
-        for name, brain_db in brain_manager.brain_databases.items():
+        print "{} available brain databases: ".format(len(brain_manager.brain_databases_names))
+        for name in brain_manager.brain_databases_names:
             try:
-                print_info(name, brain_db)
+                print_info(name, brain_manager[name])
             except:
                 import traceback
                 traceback.print_exc()
@@ -200,12 +200,38 @@ def check(brain_manager, name, use_spatial_code=False):
     # Simply report stats about buckets size.
     with Timer('Counting'):
         sizes, bucketkeys = brain_db.buckets_size()
+        sizes = np.array(sizes)
 
     print "Counted {1:,} candidates for {0:,} buckets".format(len(sizes), sum(sizes))
     print "Avg. candidates per bucket: {0:.2f}".format(np.mean(sizes))
     print "Std. candidates per bucket: {0:.2f}".format(np.std(sizes))
     print "Min. candidates per bucket: {0:,}".format(np.min(sizes))
     print "Max. candidates per bucket: {0:,}".format(np.max(sizes))
+    print "Sum_bucket |bucket|*(|bucket|-1): {0:,}".format(np.sum(sizes*(sizes-1)))
+
+    rng = np.random.RandomState(42)
+
+    NB_PAIRS = 1000
+    avg_spatial_distances = []
+    std_positions = []
+    with Timer('\nEvaluating avg. spatial distance between {} patches'.format(NB_PAIRS)):
+        bucket_sorted_indices = np.argsort(sizes)[::-1]
+        for idx in bucket_sorted_indices:
+            if sizes[idx] < 100:
+                break
+
+            positions = brain_db.engine.storage.retrieve([bucketkeys[idx]], attribute=brain_db.metadata['position'])[0]
+            std_positions.append(np.std(positions, axis=0))
+
+            indices = np.arange(len(positions))
+            pairs = rng.choice(indices, size=(min(len(indices)//2, NB_PAIRS), 2), replace=False)
+            selected_positions = positions[pairs]
+            distance = np.sqrt(np.sum((selected_positions[:, -1] - selected_positions[:, 0])**2, axis=1))
+            avg_spatial_distances.append(np.mean(distance))
+
+    print "Avg. spatial distance per bucket: {0:.2f}".format(np.mean(avg_spatial_distances))
+    print "Std. spatial distance per bucket: {0:.2f}".format(np.std(avg_spatial_distances))
+    print "Avg. of position std.: {}".format(np.mean(std_positions, axis=0))
 
     plt.hist(sizes, bins=np.logspace(0, np.log10(np.max(sizes))), log=True)
     plt.xlabel('Bucket sizes')

@@ -194,27 +194,29 @@ class BrainDatabaseManager(object):
         self.storage_type = storage_type
         self.storage_params = storage_params
         self.storage = storage_factory("file", **storage_params)
-        self.brain_databases = {}
 
         #Retrieves existing brain databases
-        names = self.storage.get_info(BrainDatabaseManager.DATABASES_LIST_KEY)
-        for name in names:
-            try:
-                lhash = pickle.loads(self.storage.get_info(name)["hashing_config"])
-                db_storage = storage_factory(storage_type, keyprefix=name, **storage_params)
-
-                engine = Engine(lshashes=[lhash], storage=db_storage)
-                brain_database = BrainDatabase(name, self.storage, engine)
-                self.brain_databases[name] = brain_database
-            except Exception as e:
-                print "Cannot opened '{}'".format(name)
-                print e.message[-100:]
+        self.brain_databases_names = self.storage.get_info(BrainDatabaseManager.DATABASES_LIST_KEY)
 
     def __getitem__(self, name):
-        return self.brain_databases.get(name, None)
+        if name not in self.brain_databases_names:
+            raise ValueError("Unknown database: '{}'".format(name))
+
+        try:
+            lhash = pickle.loads(self.storage.get_info(name)["hashing_config"])
+            db_storage = storage_factory(self.storage_type, keyprefix=name, **self.storage_params)
+
+            engine = Engine(lshashes=[lhash], storage=db_storage)
+            brain_database = BrainDatabase(name, self.storage, engine)
+            return brain_database
+        except Exception as e:
+            print "Cannot opened '{}'".format(name)
+            print e.message[-100:]
+
+        return None
 
     def new_brain_database(self, name, lhash, metadata={}):
-        if name in self.brain_databases:
+        if name in self.brain_databases_names:
             raise ValueError("Brain database already exists: " + name)
 
         lhash.name = name + "_" + lhash.name
@@ -244,8 +246,7 @@ class BrainDatabaseManager(object):
         db_storage = storage_factory(self.storage_type, keyprefix=name, **self.storage_params)
         engine = Engine(lshashes=[lhash], storage=db_storage)
         brain_database = BrainDatabase(name, self.storage, engine)
-        self.brain_databases[name] = brain_database
-
+        self.brain_databases_names.append(name)
         return brain_database
 
     def remove_brain_database(self, brain_database, full=False):
@@ -258,11 +259,12 @@ class BrainDatabaseManager(object):
             brain_database.engine.clean_all_buckets()
 
     def remove_all_brain_databases(self, full=False):
-        for brain_db in self.brain_databases.values():
+        for name in self.brain_databases_names:
+            brain_db = self[name]
             self.remove_brain_database(brain_db, full)
 
     def __contains__(self, name):
-        return name in self.brain_databases
+        return name in self.brain_databases_names
 
     def __str__(self):
-        return "[" + ", ".join(sorted(self.brain_databases.keys())) + "]"
+        return "[" + ", ".join(sorted(self.brain_databases_names)) + "]"

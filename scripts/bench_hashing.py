@@ -218,15 +218,15 @@ def main(brain_manager=None):
     elif args.command == "check":
         names = args.names
         if len(args.names) == 0:
-            names = brain_manager.brain_databases
+            names = brain_manager.brain_databases_names
 
         for name in names:
             try:
                 print "\n" + name
                 framework.check(brain_manager, name,
                                 use_spatial_code=args.use_spatial_code)
-            except:
-                pass
+            except Exception as e:
+                print e.message
 
     return brain_manager
 

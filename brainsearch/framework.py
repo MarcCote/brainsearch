@@ -264,31 +264,35 @@ def map(brain_manager, name, brain_data, K=100, min_nonempty=0, use_spatial_code
         # Position of extracted patches represent to top left corner.
         center_positions = brain_patches.positions + half_patch_size
 
-        positives = np.zeros_like(brain.image, dtype=np.float32)
-        negatives = np.zeros_like(brain.image, dtype=np.float32)
+        labels = -1 * np.ones((len(brain_patches), K), dtype=np.uint8)
+        dists = -1 * np.ones((len(brain_patches), K), dtype=np.float32)
 
         start_brain = time.time()
         nb_neighbors_per_brain = 0
         nb_empty = 0
 
         for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["label", "position"]):
-            voxel_pos = center_positions[patch_id]
-            neighbors_label = neighbors['label']
+            labels[patch_id, :len(neighbors['label'])] = neighbors['label'].flatten()
+            dists[patch_id, :len(neighbors['dist'])] = neighbors['dist'].flatten()
+
+            #voxel_pos = center_positions[patch_id]
             #neighbors_distance = neighbors['dist']
 
-            if len(neighbors_label) <= 0:
-                nb_empty += 1
-                continue
+            #if len(neighbors_label) <= 0:
+            #    nb_empty += 1
+            #    continue
 
-            nb_neighbors_per_brain += len(neighbors_label)
-            negatives[voxel_pos] += np.sum(neighbors_label == 0)
-            positives[voxel_pos] += np.sum(neighbors_label == 1)
+            #nb_neighbors_per_brain += len(neighbors_label)
+            #negatives[voxel_pos] += np.sum(neighbors_label == 0)
+            #positives[voxel_pos] += np.sum(neighbors_label == 1)
+
+        positives = np.zeros_like(brain.image, dtype=np.float32)
+        negatives = np.zeros_like(brain.image, dtype=np.float32)
+        negatives[zip(*center_positions)] = np.sum(labels == 0, axis=1)
+        positives[zip(*center_positions)] = np.sum(labels == 1, axis=1)
 
         print "Brain #{0} ({3:,} patches) found {1:,} neighbors in {2:.2f} sec.".format(brain_id, nb_neighbors_per_brain, time.time()-start_brain, len(brain_patches))
         print "Patches with no neighbors: {:,}".format(nb_empty)
-
-        from ipdb import set_trace as dbg
-        dbg()
 
         results_folder = pjoin('.', 'results', brain_db.name, brain_data.name)
         if not os.path.isdir(results_folder):
@@ -302,6 +306,13 @@ def map(brain_manager, name, brain_data, K=100, min_nonempty=0, use_spatial_code
         name = "{name}__{dbname}__top{k}".format(name=brain.name, dbname=brain_db.name, k=K)
         save_nifti(brain.image, brain.infos['affine'], pjoin(results_folder, "{}_{}.nii.gz".format(brain_data.name, brain.name)))
         save_nifti(metric_map, brain.infos['affine'], pjoin(results_folder, "{}.nii.gz".format(name)))
+        #from ipdb import set_trace as dbg
+        #dbg()
+        np.savez(pjoin(results_folder, name),
+                 positives=positives, negatives=negatives,
+                 count=(total_neg, total_pos),
+                 dists=dists,
+                 labels=labels)
 
 # def vizu():
 #     from brainsearch.vizu_chaco import NoisyBrainsearchViewer

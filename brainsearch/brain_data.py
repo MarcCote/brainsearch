@@ -16,6 +16,43 @@ def brain_data_factory(config, skip=0, pipeline=BrainPipelineProcessing()):
         return NiftiBrainData(name=name, sources=sources, skip=skip, pipeline=pipeline)
 
 
+class BrainPatches(object):
+    def __init__(self, brain, patches, positions):
+        self.brain = brain
+        self.patches = patches
+        self.positions = positions
+        self._brain_ids = None
+        self._labels = None
+
+    def __len__(self):
+        return len(self.patches)
+
+    @property
+    def brain_ids(self):
+        if self._brain_ids is None:
+            self._brain_ids = np.ones(len(self), dtype=np.int32) * self.brain.id
+
+        return self._brain_ids
+
+    @property
+    def labels(self):
+        if self._labels is None:
+            self._labels = np.ones(len(self), dtype=np.int8) * self.brain.label
+
+        return self._labels
+
+    def create_vectors(self, use_spatial_code=False):
+        vectors = self.patches.reshape((len(self), -1))
+
+        if use_spatial_code:
+            # Normalize position
+            pos_normalized = self.positions / np.array(self.brain.infos['img_shape'], dtype="float32")
+            pos_normalized = pos_normalized.astype("float32")
+            vectors = np.c_[pos_normalized, vectors]
+
+        return vectors
+
+
 class Brain(object):
     def __init__(self, image, id, name, label, **infos):
         self.image = image
@@ -24,25 +61,12 @@ class Brain(object):
         self.label = label
         self.infos = infos
 
-    def extract_patches(self, patch_shape, min_nonempty=None, with_info=False, with_positions=False):
+    def extract_patches(self, patch_shape, min_nonempty=None):
         if min_nonempty > np.prod(patch_shape):
             raise ValueError("min_nonempty must be smaller than nb. of voxels in a patch!")
 
         patches, positions = blockify(self.image, patch_shape, min_nonempty_ratio=min_nonempty)
-
-        if not with_info:
-            if with_positions:
-                return patches, positions
-
-            return patches
-
-        nb_patches = len(patches)
-        infos = {"patch": patches,
-                 "position": positions,
-                 "id": np.ones(nb_patches, dtype=np.int32) * self.id,
-                 "label": np.ones(nb_patches, dtype=np.int8) * self.label}
-
-        return patches, infos
+        return BrainPatches(self, patches, positions)
 
 
 class BrainData(object):

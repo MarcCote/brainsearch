@@ -119,16 +119,16 @@ class BrainDatabase(object):
 
         return labels_count
 
-    def insert(self, vectors, patches, labels, positions, brain_ids):
+    def insert(self, vectors, brain_patches):
         data = {}
-        data[self.metadata['patch']] = patches
-        data[self.metadata['position']] = positions
-        data[self.metadata['label']] = labels
-        data[self.metadata['id']] = brain_ids
+        data[self.metadata['patch']] = brain_patches.patches
+        data[self.metadata['position']] = brain_patches.positions
+        data[self.metadata['label']] = brain_patches.labels
+        data[self.metadata['id']] = brain_patches.brain_ids
 
         hashkeys = self.engine.store_batch(vectors, data)
         self.update(nb_patches=len(vectors))
-        self.update(labels_count=np.bincount(labels))
+        self.update(labels_count=np.bincount(brain_patches.labels))
         return hashkeys
 
     def insert_with_pos(self, patches, labels, positions, brain_ids):

@@ -123,7 +123,6 @@ def buildArgsParser():
 
     p.add_argument('--use_spatial_code', action='store_true', help='include spatial position of a patch in hashcode')
     p.add_argument('-m', dest="min_nonempty", type=float, help='consider only patches having this minimum percent of non-empty voxels')
-    p.add_argument('-N', type=int, help='use N brains', default=10)
     p.add_argument('-r', dest="resampling_factor", type=float, help='resample image before processing', default=1.)
     p.add_argument('--norm', dest="do_normalization", action="store_true", help='perform histogram equalization')
 

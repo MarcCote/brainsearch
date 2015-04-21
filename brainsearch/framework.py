@@ -175,16 +175,10 @@ def add(brain_manager, name, brain_data, min_nonempty=0, use_spatial_code=False)
     for brain_id, brain in enumerate(brain_data):
         start_brain = time.time()
         with Timer("  Extracting"):
-            patches, datainfo = brain.extract_patches(patch_shape, min_nonempty=min_nonempty, with_info=True)
+            brain_patches = brain.extract_patches(patch_shape, min_nonempty=min_nonempty)
+            vectors = brain_patches.create_vectors(use_spatial_code=use_spatial_code)
 
-        vectors = patches.reshape((-1, np.prod(patch_shape)))
-        if use_spatial_code:
-            # Normalize position
-            pos_normalized = datainfo["position"] / np.array(brain.infos['img_shape'], dtype="float32")
-            pos_normalized = pos_normalized.astype("float32")
-            vectors = np.c_[pos_normalized, vectors]
-
-        hashkeys = brain_db.insert(vectors, datainfo["patch"], datainfo["label"], datainfo["position"], datainfo["id"])
+        hashkeys = brain_db.insert(vectors, brain_patches)
 
         print "ID: {0} (label:{3}), {1:,} patches in {2:.2f} sec.".format(brain_id, len(hashkeys), time.time()-start_brain, brain.label)
         nb_elements_total += len(hashkeys)
@@ -249,6 +243,95 @@ def check(brain_manager, name, use_spatial_code=False):
     #brain_db.show_large_buckets(sizes, bucketkeys, use_spatial_code)
 
 
+def map(brain_manager, name, brain_data, K=100, min_nonempty=0, use_spatial_code=False):
+    brain_db = brain_manager[name]
+    if brain_db is None:
+        raise ValueError("Unexisting brain database: " + name)
+
+    patch_shape = brain_db.metadata['patch'].shape
+
+    print 'Mapping...'
+    brain_db.engine.distance = EuclideanDistance(brain_db.metadata['patch'])
+    brain_db.engine.filters = [NearestFilter(K)]
+    #brain_db.engine.filters = [DistanceThresholdFilter(10)]
+
+    half_patch_size = np.array(patch_shape) // 2
+
+    for brain_id, brain in enumerate(brain_data):
+        brain_patches = brain.extract_patches(patch_shape, min_nonempty=min_nonempty)
+        vectors = brain_patches.create_vectors(use_spatial_code=use_spatial_code)
+
+        # Position of extracted patches represent to top left corner.
+        center_positions = brain_patches.positions + half_patch_size
+
+        positives = np.zeros_like(brain.image, dtype=np.float32)
+        negatives = np.zeros_like(brain.image, dtype=np.float32)
+
+        start_brain = time.time()
+        nb_neighbors_per_brain = 0
+        nb_empty = 0
+
+        for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["label", "position"]):
+            voxel_pos = center_positions[patch_id]
+            neighbors_label = neighbors['label']
+            #neighbors_distance = neighbors['dist']
+
+            if len(neighbors_label) <= 0:
+                nb_empty += 1
+                continue
+
+            nb_neighbors_per_brain += len(neighbors_label)
+            negatives[voxel_pos] += np.sum(neighbors_label == 0)
+            positives[voxel_pos] += np.sum(neighbors_label == 1)
+
+        print "Brain #{0} ({3:,} patches) found {1:,} neighbors in {2:.2f} sec.".format(brain_id, nb_neighbors_per_brain, time.time()-start_brain, len(brain_patches))
+        print "Patches with no neighbors: {:,}".format(nb_empty)
+
+        from ipdb import set_trace as dbg
+        dbg()
+
+        results_folder = pjoin('.', 'results', brain_db.name)
+        if not os.path.isdir(results_folder):
+            os.mkdir(results_folder)
+
+        def generate_name(prefix, dataset_name, brain_id, dbname, k):
+            if prefix != "":
+                return "{}_{}-{}_db-{}_kNN-{}".format(prefix, dataset_name, brain_id, dbname, k)
+            else:
+                return "{}-{}_db-{}_kNN-{}".format(dataset_name, brain_id, dbname, k)
+
+        name = generate_name(brain_id=brain_id, dataset_name=brain.name, dbname=brain_db.name, k=K)
+
+        total_neg, total_pos = brain_db.labels_count()
+        total = float(total_pos + total_neg)
+        ratio_pos = (total_pos / total)
+        metric_map = proportion_test_map(positives, negatives, ratio_pos=ratio_pos)
+
+        save_nifti(brain.image, brain.infos['affine'], pjoin(results_folder, "{}_{}.nii.gz".format(brain_data.name, brain.name)))
+        save_nifti(metric_map, brain.infos['affine'], pjoin(results_folder, "metric_{}.nii.gz".format(name)))
+
+# def vizu():
+#     from brainsearch.vizu_chaco import NoisyBrainsearchViewer
+
+#     brain_db = brain_manager[args.name]
+#     if brain_db is None:
+#         raise ValueError("Unexisting brain database: " + args.name)
+
+#     patch_shape = brain_db.metadata['patch'].shape
+#     config = json.load(open(args.config))
+#     brain_data = brain_data_factory(config, pipeline=pipeline)
+
+#     for brain_id, brain in enumerate(brain_data):
+#         print 'Viewing brain #{0} (label: {1})'.format(brain_id, brain.label)
+#         patches, positions = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty, with_positions=True)
+
+#         query = {'patches': patches,
+#                  'positions': positions,
+#                  'patch_size': patch_shape}
+#         viewer = NoisyBrainsearchViewer(query, brain_db.engine, brain_voxels=brain.image)
+#         viewer.configure_traits()
+
+
 # def eval():
 #     brain_database = brain_manager[args.name]
 #     if brain_database is None:
@@ -295,190 +378,3 @@ def check(brain_manager, name, use_spatial_code=False):
 #     nb_brains = brain_id + 1
 #     print "Found a total of {0:,} neighbors for {1} brains ({3:,} patches) in {2:.2f} sec.".format(nb_neighbors, nb_brains, time.time()-start, nb_patches)
 #     print "Classification error: {:2.2f}%".format(100 * (1. - nb_success/nb_brains))
-
-# def map():
-#     brain_db = brain_manager[args.name]
-#     if brain_db is None:
-#         raise ValueError("Unexisting brain database: " + args.name)
-
-#     patch_shape = brain_db.metadata['patch'].shape
-#     config = json.load(open(args.config))
-#     brain_data = brain_data_factory(config, pipeline=pipeline)
-
-#     total_neg, total_pos = brain_db.labels_count()
-#     total = float(total_pos + total_neg)
-#     ratio_neg = (total_neg / total)
-#     ratio_pos = (total_pos / total)
-
-#     print 'Mapping...'
-#     if args.radius is not None:
-#         brain_db.engine.distance = EuclideanDistance(brain_db.metadata['patch'])
-#         brain_db.engine.filters = [NearestFilter(args.k)]
-#         #brain_db.engine.filters = [DistanceThresholdFilter(10)]
-
-#         half_voxel_size = np.array(patch_shape) // 2
-
-#         start = time.time()
-#         for brain_id, brain in enumerate(brain_data):
-#             patches, positions = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty, with_positions=True)
-
-#             positives = np.zeros_like(brain.image, dtype=np.float32)
-#             negatives = np.zeros_like(brain.image, dtype=np.float32)
-
-#             start_brain = time.time()
-#             nb_neighbors_per_brain = 0
-#             nb_empty = 0
-
-#             from ipdb import set_trace as dbg
-#             dbg()
-
-#             for patch_id, neighbors in brain_db.get_neighbors_with_pos(patches, positions, args.radius, attributes=["label"]):
-#                 #patch = patches[patch_id]
-#                 position = positions[patch_id]
-#                 neighbors_label = neighbors['label']
-
-#                 voxel_pos = tuple(position + half_voxel_size)
-
-#                 if len(neighbors_label) <= 0:
-#                     nb_empty += 1
-#                     #classif_map[pixel_pos] = 0.5 + OFFSET
-#                     #parkinson_prob_map[pixel_pos] = 0.5 + OFFSET
-#                     continue
-
-#                 nb_neighbors_per_brain += len(neighbors_label)
-
-#                 # Assume binary classification for now
-#                 negatives[voxel_pos] += np.sum(neighbors_label == 0)
-#                 positives[voxel_pos] += np.sum(neighbors_label == 1)
-
-#                 # pos = nb_pos * ratio_neg
-#                 # neg = nb_neg * ratio_pos
-#                 # m = (pos-neg) / len(neighbors_label)
-#                 # if m > 0:
-#                 #     m /= ratio_neg
-#                 # else:
-#                 #     m /= ratio_pos
-
-#                 # classif_map[pixel_pos] = (m+1)/2. + OFFSET
-#                 # parkinson_prob_map[pixel_pos] = nb_pos/len(neighbors_label) + OFFSET
-
-#             print "Brain #{0} ({3:,} patches) found {1:,} neighbors in {2:.2f} sec.".format(brain_id, nb_neighbors_per_brain, time.time()-start_brain, len(patches))
-#             print "Patches with no neighbors: {:,}".format(nb_empty)
-
-#             from ipdb import set_trace as dbg
-#             dbg()
-
-#             RESULTS_FOLDERS = './results_pos'
-#             if not os.path.isdir(RESULTS_FOLDERS):
-#                 os.mkdir(RESULTS_FOLDERS)
-
-#             def generate_name(prefix, dataset_name, brain_id, dbname, k):
-#                 if prefix != "":
-#                     return "{}_{}-{}_db-{}_kNN-{}".format(prefix, dataset_name, brain_id, dbname, k)
-#                 else:
-#                     return "{}-{}_db-{}_kNN-{}".format(dataset_name, brain_id, dbname, k)
-
-#             name = generate_name(prefix=args.prefix, brain_id=brain_id, dataset_name=brain.name, dbname=brain_db.name, k=args.k)
-
-#             parkinson_prob_map = positives / (positives + negatives)
-#             parkinson_prob_map = np.nan_to_num(parkinson_prob_map)
-#             parkinson_prob_map[zip(*(positions+half_voxel_size))] += OFFSET
-
-#             P = ratio_pos
-#             N = positives + negatives
-#             voxel_std = np.sqrt(P*(1-P)/N)
-#             probs = positives / N
-#             Z = (probs-P) / voxel_std
-
-#             Z *= (positives >= 5).astype('float32')
-#             Z *= (negatives >= 5).astype('float32')
-
-#             parkinson_prob_map = np.nan_to_num(Z)
-
-#             save_nifti(brain.image, brain.infos['affine'], pjoin(RESULTS_FOLDERS, "{}_{}.nii.gz".format(brain_data.name, brain.name)))
-#             #save_nifti(classif_map, brain.infos['affine'], pjoin(RESULTS_FOLDERS, "classif_{}.nii.gz".format(name)))
-#             save_nifti(parkinson_prob_map, brain.infos['affine'], pjoin(RESULTS_FOLDERS, "parkinson_prob_map_{}.nii.gz".format(name)))
-
-#     else:
-#         brain_db.engine.distance = EuclideanDistance(brain_db.metadata['patch'])
-#         brain_db.engine.filters = [NearestFilter(args.k)]
-#         #brain_db.engine.filters = [DistanceThresholdFilter(10)]
-
-#         half_patch_size = np.array(patch_shape) // 2
-
-#         start = time.time()
-#         for brain_id, brain in enumerate(brain_data):
-#             patches, positions = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty, with_positions=True)
-
-#             vectors = patches.reshape((-1, np.prod(patch_shape)))
-#             if args.use_spatial_code:
-#                 # Normalize position
-#                 pos_normalized = positions / np.array(brain.infos['img_shape'], dtype="float32")
-#                 pos_normalized = pos_normalized.astype("float32")
-#                 vectors = np.c_[pos_normalized, vectors]
-
-#             positives = np.zeros_like(brain.image, dtype=np.float32)
-#             negatives = np.zeros_like(brain.image, dtype=np.float32)
-
-#             start_brain = time.time()
-#             nb_neighbors_per_brain = 0
-#             nb_empty = 0
-
-#             for patch_id, neighbors in brain_db.get_neighbors(vectors, patches, attributes=["label", "position"]):
-#                 #patch = patches[patch_id]
-#                 position = positions[patch_id]
-#                 neighbors_label = neighbors['label']
-#                 #neighbors_position = neighbors['position']
-
-#                 voxel_pos = tuple(position + half_patch_size)
-
-#                 if len(neighbors_label) <= 0:
-#                     nb_empty += 1
-#                     continue
-
-#                 nb_neighbors_per_brain += len(neighbors_label)
-#                 negatives[voxel_pos] += np.sum(neighbors_label == 0)
-#                 positives[voxel_pos] += np.sum(neighbors_label == 1)
-
-#             print "Brain #{0} ({3:,} patches) found {1:,} neighbors in {2:.2f} sec.".format(brain_id, nb_neighbors_per_brain, time.time()-start_brain, len(patches))
-#             print "Patches with no neighbors: {:,}".format(nb_empty)
-
-#             from ipdb import set_trace as dbg
-#             dbg()
-
-#             RESULTS_FOLDERS = './results_new'
-#             if not os.path.isdir(RESULTS_FOLDERS):
-#                 os.mkdir(RESULTS_FOLDERS)
-
-#             def generate_name(prefix, dataset_name, brain_id, dbname, k):
-#                 if prefix != "":
-#                     return "{}_{}-{}_db-{}_kNN-{}".format(prefix, dataset_name, brain_id, dbname, k)
-#                 else:
-#                     return "{}-{}_db-{}_kNN-{}".format(dataset_name, brain_id, dbname, k)
-
-#             name = generate_name(prefix=args.prefix, brain_id=brain_id, dataset_name=brain.name, dbname=brain_db.name, k=args.k)
-
-#             metric_map = proportion_test_map(positives, negatives, ratio_pos=ratio_pos)
-#             save_nifti(brain.image, brain.infos['affine'], pjoin(RESULTS_FOLDERS, "{}_{}.nii.gz".format(brain_data.name, brain.name)))
-#             save_nifti(metric_map, brain.infos['affine'], pjoin(RESULTS_FOLDERS, "metric_{}.nii.gz".format(name)))
-
-# def vizu():
-#     from brainsearch.vizu_chaco import NoisyBrainsearchViewer
-
-#     brain_db = brain_manager[args.name]
-#     if brain_db is None:
-#         raise ValueError("Unexisting brain database: " + args.name)
-
-#     patch_shape = brain_db.metadata['patch'].shape
-#     config = json.load(open(args.config))
-#     brain_data = brain_data_factory(config, pipeline=pipeline)
-
-#     for brain_id, brain in enumerate(brain_data):
-#         print 'Viewing brain #{0} (label: {1})'.format(brain_id, brain.label)
-#         patches, positions = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty, with_positions=True)
-
-#         query = {'patches': patches,
-#                  'positions': positions,
-#                  'patch_size': patch_shape}
-#         viewer = NoisyBrainsearchViewer(query, brain_db.engine, brain_voxels=brain.image)
-#         viewer.configure_traits()

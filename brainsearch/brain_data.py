@@ -7,13 +7,13 @@ from brainsearch.imagespeed import blockify
 from brainsearch.brain_processing import BrainPipelineProcessing
 
 
-def brain_data_factory(config, skip=0, pipeline=BrainPipelineProcessing()):
+def brain_data_factory(config, pipeline=BrainPipelineProcessing(), id=None):
     name = config["name"]
     sources = config["sources"]
     if config["type"] == "numpy":
-        return NumpyBrainData(name=name, sources=sources, skip=skip, pipeline=pipeline)
+        return NumpyBrainData(name=name, sources=sources, pipeline=pipeline, id=id)
     elif config["type"] == "nifti":
-        return NiftiBrainData(name=name, sources=sources, skip=skip, pipeline=pipeline)
+        return NiftiBrainData(name=name, sources=sources, pipeline=pipeline, id=id)
 
 
 class BrainPatches(object):
@@ -70,10 +70,10 @@ class Brain(object):
 
 
 class BrainData(object):
-    def __init__(self, name, sources, skip=0, pipeline=BrainPipelineProcessing()):
+    def __init__(self, name, sources, pipeline=BrainPipelineProcessing(), id=None):
         self.name = name
         self.sources = sources
-        self.skip = skip
+        self.id = id
         self.pipeline = pipeline
 
     def __len__(self):
@@ -89,7 +89,7 @@ class NiftiBrainData(BrainData):
 
     def __iter__(self):
         for i, source in enumerate(self.sources):
-            if i < self.skip:
+            if self.id is not None and i != self.id:
                 continue
 
             name = source['name'] if 'name' in source else os.path.basename(source['path']).split(".nii")[0]

@@ -290,25 +290,18 @@ def map(brain_manager, name, brain_data, K=100, min_nonempty=0, use_spatial_code
         from ipdb import set_trace as dbg
         dbg()
 
-        results_folder = pjoin('.', 'results', brain_db.name)
+        results_folder = pjoin('.', 'results', brain_db.name, brain_data.name)
         if not os.path.isdir(results_folder):
-            os.mkdir(results_folder)
-
-        def generate_name(prefix, dataset_name, brain_id, dbname, k):
-            if prefix != "":
-                return "{}_{}-{}_db-{}_kNN-{}".format(prefix, dataset_name, brain_id, dbname, k)
-            else:
-                return "{}-{}_db-{}_kNN-{}".format(dataset_name, brain_id, dbname, k)
-
-        name = generate_name(brain_id=brain_id, dataset_name=brain.name, dbname=brain_db.name, k=K)
+            os.makedirs(results_folder)
 
         total_neg, total_pos = brain_db.labels_count()
         total = float(total_pos + total_neg)
         ratio_pos = (total_pos / total)
         metric_map = proportion_test_map(positives, negatives, ratio_pos=ratio_pos)
 
+        name = "{name}__{dbname}__top{k}".format(name=brain.name, dbname=brain_db.name, k=K)
         save_nifti(brain.image, brain.infos['affine'], pjoin(results_folder, "{}_{}.nii.gz".format(brain_data.name, brain.name)))
-        save_nifti(metric_map, brain.infos['affine'], pjoin(results_folder, "metric_{}.nii.gz".format(name)))
+        save_nifti(metric_map, brain.infos['affine'], pjoin(results_folder, "{}.nii.gz".format(name)))
 
 # def vizu():
 #     from brainsearch.vizu_chaco import NoisyBrainsearchViewer

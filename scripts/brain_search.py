@@ -109,6 +109,7 @@ def build_subcommand_map(subparser):
 
     p.add_argument('name', type=str, help='name of the brain database')
     p.add_argument('config', type=str, help='contained in a JSON file')
+    p.add_argument('--id', type=int, help='map only brain #id')
     p.add_argument('-k', type=int, help='consider at most K nearest-neighbors', default=100)
     p.add_argument('--prefix', type=str, help="prefix for the name of the results files", default="")
     p.add_argument('--radius', type=int, help="only look at neighbors within a certain radius")
@@ -342,7 +343,7 @@ def main(brain_manager=None):
 
     elif args.command == "map":
         config = json.load(open(args.config))
-        brain_data = brain_data_factory(config, pipeline=pipeline)
+        brain_data = brain_data_factory(config, pipeline=pipeline, id=args.id)
         framework.map(brain_manager, args.name, brain_data, K=args.k,
                       min_nonempty=args.min_nonempty,
                       use_spatial_code=args.use_spatial_code)

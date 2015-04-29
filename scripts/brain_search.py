@@ -208,8 +208,10 @@ def main(brain_manager=None):
     parser = buildArgsParser()
     args = parser.parse_args()
 
+    readonly = args.command not in ["init", "add"]
+
     if brain_manager is None:
-        brain_manager = BrainDatabaseManager(args.storage, dir=args.dir)
+        brain_manager = BrainDatabaseManager(args.storage, dir=args.dir, readonly=readonly)
 
     # Build processing pipeline
     pipeline = BrainPipelineProcessing()

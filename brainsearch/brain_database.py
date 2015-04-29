@@ -48,8 +48,17 @@ class BrainDatabase(object):
 
         return nb_patches
 
-    def nb_buckets(self):
-        return self.engine.nb_buckets()
+    def nb_buckets(self, check_integrity=False):
+        nb_buckets = self.storage.get_info(self.name)["nb_buckets"]
+        nb_buckets = int(nb_buckets) if nb_buckets is not None else 0
+
+        if check_integrity:
+            true_nb_buckets = self.engine.nb_buckets()
+            if true_nb_buckets != nb_buckets:
+                self.update(nb_buckets=true_nb_buckets, overwrite=True)
+                return true_nb_buckets
+
+        return nb_buckets
 
     def buckets_size(self):
         return self.engine.buckets_size()
@@ -100,6 +109,11 @@ class BrainDatabase(object):
         #plt.figure()
         #plt.hist(all_distances, bins=100)
         plt.show()
+
+    def label_proportions(self, check_integrity=False):
+        info = self.storage.get_info(self.name)
+        label_counts = np.array([info["label_count_0"], info["label_count_1"]], dtype=np.float32)
+        return label_counts / label_counts.sum()
 
     def labels_count(self, check_integrity=False):
         info = self.storage.get_info(self.name)
@@ -159,13 +173,19 @@ class BrainDatabase(object):
 
         return self.engine.neighbors_batch_with_pos(patches, positions, radius, *attributes)
 
-    def update(self, nb_patches=None, labels_count=None, overwrite=False):
+    def update(self, nb_patches=None, labels_count=None, nb_buckets=None, overwrite=False):
         info = self.storage.get_info(self.name)
         if nb_patches is not None:
             if overwrite:
                 info["nb_patches"] = nb_patches
             else:
                 info["nb_patches"] += nb_patches
+
+        if nb_buckets is not None:
+            if overwrite:
+                info["nb_buckets"] = nb_buckets
+            else:
+                info["nb_buckets"] += nb_buckets
 
         if labels_count is not None:
             for i, count in enumerate(labels_count):

@@ -28,13 +28,41 @@ from nearpy.utils import chunk, ichunk
 from brainsearch.brain_processing import BrainPipelineProcessing, BrainNormalization, BrainResampling
 
 
-def proportion_test_map(positives, negatives, ratio_pos):
-    P = ratio_pos
-    N = positives + negatives
-    voxel_std = np.sqrt(P*(1-P)/N)
-    probs = positives / N
-    Z = (probs-P) / voxel_std
-    return Z
+def hist_prop(p, bins=25, P0=None, show=True, *args, **kwargs):
+    if show:
+        plt.figure()
+
+    if type(bins) is int:
+        plt.hist(p, bins=bins, *args, **kwargs)
+    elif bins.upper() == "FD":
+        # Plot histogram using Freedman & Diaconis rule.
+        # http://en.wikipedia.org/wiki/Freedman%E2%80%93Diaconis_rule
+        IQR = lambda x: np.subtract(*np.percentile(x, [75, 25]))
+        plt.hist(p, bins=1./(2*IQR(p)*len(p)**(-1/3.)), normed=True, *args, **kwargs)
+
+    if P0 is not None:
+        plt.plot([P0]*2, [0, 1], 'r', linewidth=2)
+
+    if show:
+        plt.show()
+
+
+def two_tailed_test_of_population_proportion(P0, p, n):
+    """
+    P0: Hypothesized value of the true population proportion
+    p: sample proportion
+    n: sample size
+    """
+    # Compute test statistic
+    # http://stattrek.com/hypothesis-test/proportion.aspx
+    sigma = np.sqrt(P0*(1-P0)/n)
+    z_statistic = (p - P0) / sigma
+
+    # Compute p-value
+    import scipy.stats as stat
+    pvalue = 2 * stat.norm.cdf(-abs(z_statistic))  # Two-tailed test, take twice the lower tail.
+
+    return z_statistic, pvalue
 
 
 def proportion_map(positives, negatives, ratio_pos):
@@ -88,7 +116,7 @@ def list(brain_manager, name, verbose=False, check_integrity=False):
             labels_counts = ["{}: {:,}".format(i, label_count) for i, label_count in enumerate(brain_db.labels_count(check_integrity=check_integrity))]
             print "\tLabels: {" + "; ".join(labels_counts) + "}"
             print "\tPatches: {:,}".format(brain_db.nb_patches(check_integrity=check_integrity))
-            print "\tBuckets: {:,}".format(brain_db.nb_buckets())
+            print "\tBuckets: {:,}".format(brain_db.nb_buckets(check_integrity=check_integrity))
 
     if name in brain_manager:
         print_info(name, brain_manager[name])
@@ -162,7 +190,7 @@ def init(brain_manager, name, patch_shape, hashing):
     brain_manager.new_brain_database(name, hashing, metadata)
 
 
-def add(brain_manager, name, brain_data, min_nonempty=0, use_spatial_code=False):
+def add(brain_manager, name, brain_data, min_nonempty=0, spatial_weight=0.):
     brain_db = brain_manager[name]
     if brain_db is None:
         raise ValueError("Unexisting brain database: " + name)
@@ -176,7 +204,7 @@ def add(brain_manager, name, brain_data, min_nonempty=0, use_spatial_code=False)
         start_brain = time.time()
         with Timer("  Extracting"):
             brain_patches = brain.extract_patches(patch_shape, min_nonempty=min_nonempty)
-            vectors = brain_patches.create_vectors(use_spatial_code=use_spatial_code)
+            vectors = brain_patches.create_vectors(spatial_weight=spatial_weight)
 
         hashkeys = brain_db.insert(vectors, brain_patches)
 
@@ -186,7 +214,7 @@ def add(brain_manager, name, brain_data, min_nonempty=0, use_spatial_code=False)
     print "Inserted {0:,} patches ({1} brains) in {2:.2f} sec.".format(nb_elements_total, brain_id+1, time.time()-start)
 
 
-def check(brain_manager, name, use_spatial_code=False):
+def check(brain_manager, name, spatial_weight=0.):
     brain_db = brain_manager[name]
     if brain_db is None:
         raise ValueError("Unexisting brain database: " + name)
@@ -202,6 +230,9 @@ def check(brain_manager, name, use_spatial_code=False):
     print "Min. candidates per bucket: {0:,}".format(np.min(sizes))
     print "Max. candidates per bucket: {0:,}".format(np.max(sizes))
     print "Sum_bucket |bucket|*(|bucket|-1): {0:,}".format(np.sum(sizes*(sizes-1)))
+
+    from ipdb import set_trace as dbg
+    dbg()
 
     rng = np.random.RandomState(42)
 
@@ -240,10 +271,10 @@ def check(brain_manager, name, use_spatial_code=False):
 
     plt.savefig(pjoin(FIGURES_FOLDER, name), bbox_inches='tight')
 
-    #brain_db.show_large_buckets(sizes, bucketkeys, use_spatial_code)
+    #brain_db.show_large_buckets(sizes, bucketkeys, spatial_weight)
 
 
-def map(brain_manager, name, brain_data, K=100, min_nonempty=0, use_spatial_code=False):
+def create_map(brain_manager, name, brain_data, K=100, min_nonempty=0, spatial_weight=0.):
     brain_db = brain_manager[name]
     if brain_db is None:
         raise ValueError("Unexisting brain database: " + name)
@@ -259,60 +290,54 @@ def map(brain_manager, name, brain_data, K=100, min_nonempty=0, use_spatial_code
 
     for brain_id, brain in enumerate(brain_data):
         brain_patches = brain.extract_patches(patch_shape, min_nonempty=min_nonempty)
-        vectors = brain_patches.create_vectors(use_spatial_code=use_spatial_code)
+        vectors = brain_patches.create_vectors(spatial_weight=spatial_weight)
 
         # Position of extracted patches represent to top left corner.
         center_positions = brain_patches.positions + half_patch_size
 
-        labels = -1 * np.ones((len(brain_patches), K), dtype=np.uint8)
-        dists = -1 * np.ones((len(brain_patches), K), dtype=np.float32)
+        #nids = -1 * np.ones((len(brain_patches), K), dtype=np.uint8)  # No more than 256, okay for now,
+        nlabels = -1 * np.ones((len(brain_patches), K), dtype=np.uint8)
+        #ndists = -1 * np.ones((len(brain_patches), K), dtype=np.float32)
+        #npositions = -1 * np.ones((len(brain_patches), K, 3), dtype=np.uint16)
 
         start_brain = time.time()
-        nb_neighbors_per_brain = 0
-        nb_empty = 0
+        #for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["id", "label", "position"]):
+        for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["label"]):
+            #ndists[patch_id, :len(neighbors['dist'])] = neighbors['dist'].flatten()
+            nlabels[patch_id, :len(neighbors['label'])] = neighbors['label'].flatten()
+            #nids[patch_id, :len(neighbors['id'])] = neighbors['id'].flatten()
+            #npositions[patch_id, :len(neighbors['position']), :] = neighbors['position']
 
-        for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["label", "position"]):
-            labels[patch_id, :len(neighbors['label'])] = neighbors['label'].flatten()
-            dists[patch_id, :len(neighbors['dist'])] = neighbors['dist'].flatten()
+        print "Brain #{0} ({3:,} patches) found {1:,} neighbors in {2:.2f} sec.".format(brain_id, np.sum(nlabels != -1), time.time()-start_brain, len(brain_patches))
+        print "Patches with no neighbors: {:,}".format(np.all(nlabels == -1, axis=1).sum())
 
-            #voxel_pos = center_positions[patch_id]
-            #neighbors_distance = neighbors['dist']
+        ## Generate map of p-values ##
+        control = np.sum(nlabels == 0, axis=1)
+        parkinson = np.sum(nlabels == 1, axis=1)
+        #control = np.sum(np.exp(-ndists) * (nlabels == 0), axis=1)
+        #parkinson = np.sum(np.exp(-ndists) * (nlabels == 1), axis=1)
 
-            #if len(neighbors_label) <= 0:
-            #    nb_empty += 1
-            #    continue
+        P0 = brain_db.label_proportions()[1]  # Hypothesized population proportion
+        p = np.nan_to_num(parkinson / (parkinson+control))  # sample proportion
+        n = np.sum(nlabels != -1, axis=1)     # sample size
 
-            #nb_neighbors_per_brain += len(neighbors_label)
-            #negatives[voxel_pos] += np.sum(neighbors_label == 0)
-            #positives[voxel_pos] += np.sum(neighbors_label == 1)
-
-        positives = np.zeros_like(brain.image, dtype=np.float32)
-        negatives = np.zeros_like(brain.image, dtype=np.float32)
-        negatives[zip(*center_positions)] = np.sum(labels == 0, axis=1)
-        positives[zip(*center_positions)] = np.sum(labels == 1, axis=1)
-
-        print "Brain #{0} ({3:,} patches) found {1:,} neighbors in {2:.2f} sec.".format(brain_id, nb_neighbors_per_brain, time.time()-start_brain, len(brain_patches))
-        print "Patches with no neighbors: {:,}".format(nb_empty)
+        z_statistic, pvalue = two_tailed_test_of_population_proportion(P0, p, n)
+        zmap = np.zeros_like(brain.image, dtype=np.float32)
+        pmap = np.ones_like(brain.image, dtype=np.float32)
+        zmap[zip(*center_positions)] = z_statistic
+        pmap[zip(*center_positions)] = pvalue
+        zmap[np.isnan(zmap)] = 0.
+        pmap[np.isnan(pmap)] = 1.
 
         results_folder = pjoin('.', 'results', brain_db.name, brain_data.name)
         if not os.path.isdir(results_folder):
             os.makedirs(results_folder)
 
-        total_neg, total_pos = brain_db.labels_count()
-        total = float(total_pos + total_neg)
-        ratio_pos = (total_pos / total)
-        metric_map = proportion_test_map(positives, negatives, ratio_pos=ratio_pos)
-
         name = "{name}__{dbname}__top{k}".format(name=brain.name, dbname=brain_db.name, k=K)
-        save_nifti(brain.image, brain.infos['affine'], pjoin(results_folder, "{}_{}.nii.gz".format(brain_data.name, brain.name)))
-        save_nifti(metric_map, brain.infos['affine'], pjoin(results_folder, "{}.nii.gz".format(name)))
-        #from ipdb import set_trace as dbg
-        #dbg()
-        np.savez(pjoin(results_folder, name),
-                 positives=positives, negatives=negatives,
-                 count=(total_neg, total_pos),
-                 dists=dists,
-                 labels=labels)
+        save_nifti(brain.image, brain.infos['affine'], pjoin(results_folder, "{}_{}.nii.gz".format(brain.name, brain_data.name)))
+        save_nifti(pmap, brain.infos['affine'], pjoin(results_folder, "{}_pmap.nii.gz".format(name)))
+        save_nifti(zmap, brain.infos['affine'], pjoin(results_folder, "{}_zmap.nii.gz".format(name)))
+        #np.savez(pjoin(results_folder, name), dists=ndists, labels=nlabels, ids=nids, positions=npositions, voxels_positions=center_positions)
 
 # def vizu():
 #     from brainsearch.vizu_chaco import NoisyBrainsearchViewer

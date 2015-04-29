@@ -41,13 +41,13 @@ class BrainPatches(object):
 
         return self._labels
 
-    def create_vectors(self, use_spatial_code=False):
+    def create_vectors(self, spatial_weight=0.):
         vectors = self.patches.reshape((len(self), -1))
 
-        if use_spatial_code:
+        if spatial_weight > 0.:
             # Normalize position
             pos_normalized = self.positions / np.array(self.brain.infos['img_shape'], dtype="float32")
-            pos_normalized = pos_normalized.astype("float32")
+            pos_normalized = spatial_weight*pos_normalized.astype("float32")
             vectors = np.c_[pos_normalized, vectors]
 
         return vectors

@@ -1,6 +1,8 @@
+from __future__ import print_function
+import sys
 import operator
 import itertools
-
+from time import time
 from nearpy.utils import Timer
 
 
@@ -34,3 +36,23 @@ class SmartGenerator(object):
                 return gen(self.genfct())
         else:
             return self.genfct()
+
+
+class Timer2():
+    _levels = [0]
+
+    def __init__(self, txt):
+        self.txt = txt
+        self.duration = 0.
+        self.indent = "  " * self._levels[0]
+        self._levels[0] += 1
+
+    def __enter__(self):
+        self.start = time()
+        print(self.indent + self.txt + "... ", end="")
+        sys.stdout.flush()
+
+    def __exit__(self, type, value, tb):
+        self.duration = time()-self.start
+        self._levels[0] -= 1
+        print(self.indent + "{:.2f} sec.".format(self.duration))

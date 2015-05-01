@@ -281,7 +281,6 @@ def create_map(brain_manager, name, brain_data, K=100, min_nonempty=0, spatial_w
 
     patch_shape = brain_db.metadata['patch'].shape
 
-    print 'Mapping...'
     brain_db.engine.distance = EuclideanDistance(brain_db.metadata['patch'])
     brain_db.engine.filters = [NearestFilter(K)]
     #brain_db.engine.filters = [DistanceThresholdFilter(10)]
@@ -289,6 +288,7 @@ def create_map(brain_manager, name, brain_data, K=100, min_nonempty=0, spatial_w
     half_patch_size = np.array(patch_shape) // 2
 
     for brain_id, brain in enumerate(brain_data):
+        print "Mapping {}...".format(brain.name)
         brain_patches = brain.extract_patches(patch_shape, min_nonempty=min_nonempty)
         vectors = brain_patches.create_vectors(spatial_weight=spatial_weight)
 
@@ -333,10 +333,9 @@ def create_map(brain_manager, name, brain_data, K=100, min_nonempty=0, spatial_w
         if not os.path.isdir(results_folder):
             os.makedirs(results_folder)
 
-        name = "{name}__{dbname}__top{k}".format(name=brain.name, dbname=brain_db.name, k=K)
-        save_nifti(brain.image, brain.infos['affine'], pjoin(results_folder, "{}_{}.nii.gz".format(brain.name, brain_data.name)))
-        save_nifti(pmap, brain.infos['affine'], pjoin(results_folder, "{}_pmap.nii.gz".format(name)))
-        save_nifti(zmap, brain.infos['affine'], pjoin(results_folder, "{}_zmap.nii.gz".format(name)))
+        save_nifti(brain.image, brain.infos['affine'], pjoin(results_folder, "{}.nii.gz".format(brain.name)))
+        save_nifti(pmap, brain.infos['affine'], pjoin(results_folder, "{}_pmap.nii.gz".format(brain.name)))
+        save_nifti(zmap, brain.infos['affine'], pjoin(results_folder, "{}_zmap.nii.gz".format(brain.name)))
         #np.savez(pjoin(results_folder, name), dists=ndists, labels=nlabels, ids=nids, positions=npositions, voxels_positions=center_positions)
 
 # def vizu():

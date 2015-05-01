@@ -147,6 +147,7 @@ def main(brain_manager=None):
     pmap[np.isnan(pmap)] = 1  # Empty voxels
     save_nifti(tmap, brain.infos['affine'], 'tmap.nii.gz')
     save_nifti(pmap, brain.infos['affine'], 'pmap.nii.gz')
+    save_nifti(1-pmap, brain.infos['affine'], 'inv_pmap.nii.gz')
 
 if __name__ == '__main__':
     main()

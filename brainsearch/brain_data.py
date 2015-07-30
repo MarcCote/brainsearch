@@ -77,7 +77,7 @@ class BrainData(object):
         self.pipeline = pipeline
 
     def __len__(self):
-        return len(self.sources) - self.skip
+        return len(self.sources)
 
     def __iter__(self):
         raise NotImplementedError

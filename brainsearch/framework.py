@@ -231,9 +231,19 @@ def check(brain_manager, name, spatial_weight=0.):
     print "Max. candidates per bucket: {0:,}".format(np.max(sizes))
     print "Sum_bucket |bucket|*(|bucket|-1): {0:,}".format(np.sum(sizes*(sizes-1)))
 
+    std_voxels = []
+    with Timer('\nEvaluating std. of voxels values in a bucket'):
+        bucket_sorted_indices = np.argsort(sizes)[::-1]
+        for idx in bucket_sorted_indices:
+            if sizes[idx] < 100:
+                break
+
+            patches = brain_db.engine.storage.retrieve([bucketkeys[idx]], attribute=brain_db.metadata['patch'])[0]
+            std_voxels.append(np.std(patches, axis=0))
+            #print sizes[idx], std_voxels[-1].flatten()
+
     from ipdb import set_trace as dbg
     dbg()
-
     rng = np.random.RandomState(42)
 
     NB_PAIRS = 1000
@@ -295,25 +305,31 @@ def create_map(brain_manager, name, brain_data, K=100, min_nonempty=0, spatial_w
         # Position of extracted patches represent to top left corner.
         center_positions = brain_patches.positions + half_patch_size
 
-        #nids = -1 * np.ones((len(brain_patches), K), dtype=np.uint8)  # No more than 256, okay for now,
+        nids = -1 * np.ones((len(brain_patches), K), dtype=np.uint8)  # No more than 256, okay for now,
         nlabels = -1 * np.ones((len(brain_patches), K), dtype=np.uint8)
         #ndists = -1 * np.ones((len(brain_patches), K), dtype=np.float32)
         #npositions = -1 * np.ones((len(brain_patches), K, 3), dtype=np.uint16)
 
         start_brain = time.time()
-        #for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["id", "label", "position"]):
-        for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["label"]):
+        for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["id", "label"]):
+        #for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["label"]):
             #ndists[patch_id, :len(neighbors['dist'])] = neighbors['dist'].flatten()
             nlabels[patch_id, :len(neighbors['label'])] = neighbors['label'].flatten()
-            #nids[patch_id, :len(neighbors['id'])] = neighbors['id'].flatten()
+            nids[patch_id, :len(neighbors['id'])] = neighbors['id'].flatten()
             #npositions[patch_id, :len(neighbors['position']), :] = neighbors['position']
 
         print "Brain #{0} ({3:,} patches) found {1:,} neighbors in {2:.2f} sec.".format(brain_id, np.sum(nlabels != -1), time.time()-start_brain, len(brain_patches))
         print "Patches with no neighbors: {:,}".format(np.all(nlabels == -1, axis=1).sum())
 
         ## Generate map of p-values ##
-        control = np.sum(nlabels == 0, axis=1)
-        parkinson = np.sum(nlabels == 1, axis=1)
+        # Without using the leave-one-out strategy
+        #control = np.sum(nlabels == 0, axis=1)
+        #parkinson = np.sum(nlabels == 1, axis=1)
+        # Use leave-one-out strategy, i.e. do not use patches coming from the input brain.
+        control = np.sum(np.logical_and(nlabels == 0, nids != brain_id), axis=1)
+        parkinson = np.sum(np.logical_and(nlabels == 1, nids != brain_id), axis=1)
+
+        # Weight the proportion by the distance of the query patch from neighbors patch
         #control = np.sum(np.exp(-ndists) * (nlabels == 0), axis=1)
         #parkinson = np.sum(np.exp(-ndists) * (nlabels == 1), axis=1)
 

@@ -41,21 +41,6 @@ def buildArgsParser():
     return p
 
 
-def proportion_test_map(positives, negatives, ratio_pos):
-    P = ratio_pos
-    N = positives + negatives
-    voxel_std = np.sqrt(P*(1-P)/N)
-    probs = positives / N
-    Z = (probs-P) / voxel_std
-    return Z
-
-
-def proportion_map(positives, negatives, ratio_pos):
-    N = positives + negatives
-    proportions = positives / N
-    return np.nan_to_num(proportions)
-
-
 def save_nifti(image, affine, name):
     nifti = nib.Nifti1Image(image, affine)
     nib.save(nifti, name)

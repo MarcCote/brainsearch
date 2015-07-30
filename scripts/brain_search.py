@@ -208,7 +208,7 @@ def main(brain_manager=None):
     parser = buildArgsParser()
     args = parser.parse_args()
 
-    readonly = args.command not in ["init", "add"]
+    readonly = args.command not in ["init", "add", "clear"]
 
     if brain_manager is None:
         brain_manager = BrainDatabaseManager(args.storage, dir=args.dir, readonly=readonly)
@@ -240,7 +240,7 @@ def main(brain_manager=None):
             config = json.load(open(args.trainset))
             brain_data = brain_data_factory(config, pipeline=pipeline)
             for brain_id, brain in enumerate(brain_data):
-                #print "ID: {0}/{1}".format(brain_id, len(brain_data))
+                print "ID: {0}/{1}".format(brain_id, len(brain_data))
                 brain_patches = brain.extract_patches(patch_shape, min_nonempty=args.min_nonempty)
                 vectors = brain_patches.create_vectors(spatial_weight=args.spatial_weight)
                 yield vectors

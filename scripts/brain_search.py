@@ -223,7 +223,7 @@ def main(brain_manager=None):
     if args.command == "list":
         framework.list(brain_manager, args.name, verbose=args.v, check_integrity=args.f)
     elif args.command == "clear":
-        with Timer("Clearing all"):
+        with Timer("Clearing"):
             framework.clear(brain_manager, args.names, force=args.f)
 
     elif args.command == "init":
@@ -369,9 +369,10 @@ def main(brain_manager=None):
 
 
 if __name__ == '__main__':
-    try:
-        db_manager = main()
-    except:
-        import traceback
-        traceback.print_exc()
-        exit(-1)
+    main()
+    # try:
+    #     db_manager = main()
+    # except:
+    #     import traceback
+    #     traceback.print_exc()
+    #     exit(-1)

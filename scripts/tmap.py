@@ -1,27 +1,12 @@
 #!/usr/bin/env python
 from __future__ import division
 
-import os
-from os.path import join as pjoin
-
 import json
-import time
 import numpy as np
-import pylab as plt
 import nibabel as nib
-from collections import defaultdict
 
-from itertools import chain, izip
-import brainsearch.vizu as vizu
-
-#from brainsearch.imagespeed import blockify
-from brainsearch.brain_database import BrainDatabaseManager
 from brainsearch.brain_data import brain_data_factory
 from brainsearch.utils import Timer2 as Timer
-from brainsearch import framework
-
-from nearpy.distances import EuclideanDistance
-from nearpy.filters import NearestFilter
 
 from brainsearch.brain_processing import BrainPipelineProcessing, BrainNormalization, BrainResampling
 
@@ -29,12 +14,11 @@ import argparse
 
 
 def buildArgsParser():
-    DESCRIPTION = "Script to perform brain searches."
+    DESCRIPTION = "Script to generate a tmap and a pmap using a two-tailed hypothesis test of difference of means."
     p = argparse.ArgumentParser(description=DESCRIPTION)
 
     p.add_argument('configs', type=str, nargs="+", help='JSON file describing the data')
 
-    p.add_argument('-m', dest="min_nonempty", type=float, help='consider only patches having this minimum percent of non-empty voxels')
     p.add_argument('-r', dest="resampling_factor", type=float, help='resample image before processing', default=1.)
     p.add_argument('--norm', dest="do_normalization", action="store_true", help='perform histogram equalization')
 
@@ -93,7 +77,6 @@ def main(brain_manager=None):
         mean_controls /= nb_controls
         mean_parkinsons /= nb_parkinsons
 
-    # Compute sample means
     std_controls = np.zeros_like(mean_controls, dtype=dtype)
     std_parkinsons = np.zeros_like(mean_parkinsons, dtype=dtype)
     with Timer("Computing standard deviation of samples"):
@@ -118,7 +101,8 @@ def main(brain_manager=None):
 
     # Compute the test statistic t
     stderror = np.sqrt((s1**2/n1) + (s2**2/n2))
-    tmap = ((mean_controls-mean_parkinsons) - 0) / stderror
+    # The Null hypothesis : mu1 - mu2 = 0
+    tmap = ((mean_parkinsons-mean_controls) - 0) / stderror
     tmap[stderror == 0] = 0  # Empty voxels
 
     # Compute p-value

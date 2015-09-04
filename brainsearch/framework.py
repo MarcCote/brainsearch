@@ -125,6 +125,7 @@ def list(brain_manager, name, verbose=False, check_integrity=False):
         for name in brain_manager.brain_databases_names:
             try:
                 print_info(name, brain_manager[name])
+                print ""
             except:
                 import traceback
                 traceback.print_exc()

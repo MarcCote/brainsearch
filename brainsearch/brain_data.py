@@ -89,22 +89,25 @@ class NiftiBrainData(BrainData):
 
     def __iter__(self):
         for i, source in enumerate(self.sources):
-            if self.id is not None and i != self.id:
-                continue
+            try:
+                if self.id is not None and i != self.id:
+                    continue
 
-            name = source['name'] if 'name' in source else os.path.basename(source['path']).split(".nii")[0]
-            id = source['id'] if 'id' in source else i
+                name = source['name'] if 'name' in source else os.path.basename(source['path']).split(".nii")[0]
+                id = source['id'] if 'id' in source else i
 
-            label = source['label']
-            img = nib.load(source['path'])
-            brain = img.get_data()
+                label = source['label']
+                img = nib.load(source['path'])
+                brain = img.get_data()
 
-            brain = Brain(image=np.asarray(brain, dtype=np.float32), id=id, name=name, label=np.int8(label),
-                          affine=img.get_affine(), pixeldim=img.get_header().get_zooms()[:3],
-                          img_shape=img.shape)
+                brain = Brain(image=np.asarray(brain, dtype=np.float32), id=id, name=name, label=np.int8(label),
+                              affine=img.get_affine(), pixeldim=img.get_header().get_zooms()[:3],
+                              img_shape=img.shape)
 
-            self.pipeline.process(brain)
-            yield brain
+                self.pipeline.process(brain)
+                yield brain
+            except IOError:
+                print "Cannot find {}. Skipping it.".format(source['path'])
 
 
 class NumpyBrainData(BrainData):

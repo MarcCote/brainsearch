@@ -111,8 +111,26 @@ def build_subcommand_map(subparser):
     p.add_argument('config', type=str, help='contained in a JSON file')
     p.add_argument('--id', type=int, help='map only brain #id')
     p.add_argument('-k', type=int, help='consider at most K nearest-neighbors', default=100)
+    p.add_argument('-t', '--threshold', type=float, help='keep neighbors with distance < threshold.', default=np.inf)
     p.add_argument('--prefix', type=str, help="prefix for the name of the results files", default="")
     p.add_argument('--radius', type=int, help="only look at neighbors within a certain radius")
+
+
+def build_subcommand_proximity_map(subparser):
+    DESCRIPTION = ("Create a colormap of a brain showing where the neighbors patches come from "
+                   "for a particular region (using mask config file attribute).")
+
+    p = subparser.add_parser("proximity-map",
+                             description=DESCRIPTION,
+                             help=DESCRIPTION,
+                             formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    p.add_argument('name', type=str, help='name of the brain database')
+    p.add_argument('config', type=str, help='contained in a JSON file')
+    p.add_argument('--id', type=int, help='map only brain #id')
+    p.add_argument('-k', type=int, help='consider at most K nearest-neighbors.', default=100)
+    p.add_argument('-t', '--threshold', type=float, help='keep neighbors with distance < threshold.', default=np.inf)
+    p.add_argument('--prefix', type=str, help="prefix for the name of the results files", default="")
 
 
 def build_subcommand_vizu(subparser):
@@ -159,6 +177,7 @@ def buildArgsParser():
     build_subcommand_add(subparser)
     build_subcommand_eval(subparser)
     build_subcommand_map(subparser)
+    build_subcommand_proximity_map(subparser)
     build_subcommand_vizu(subparser)
     build_subcommand_check(subparser)
     build_subcommand_clear(subparser)
@@ -340,9 +359,16 @@ def main(brain_manager=None):
     elif args.command == "map":
         config = json.load(open(args.config))
         brain_data = brain_data_factory(config, pipeline=pipeline, id=args.id)
-        framework.create_map(brain_manager, args.name, brain_data, K=args.k,
+        framework.create_map(brain_manager, args.name, brain_data, K=args.k, threshold=args.threshold,
                              min_nonempty=args.min_nonempty,
                              spatial_weight=args.spatial_weight)
+
+    elif args.command == "proximity-map":
+        config = json.load(open(args.config))
+        brain_data = brain_data_factory(config, pipeline=pipeline, id=args.id)
+        framework.create_proximity_map(brain_manager, args.name, brain_data, K=args.k, threshold=args.threshold,
+                                       min_nonempty=args.min_nonempty,
+                                       spatial_weight=args.spatial_weight)
 
     elif args.command == "vizu":
         from brainsearch.vizu_chaco import NoisyBrainsearchViewer

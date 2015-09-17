@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 from collections import OrderedDict
+from itertools import izip_longest
 
 import os
 import json
@@ -13,6 +14,7 @@ def buildArgsParser():
 
     p.add_argument('filenames', metavar="file", type=str, nargs="+", help='nifti files (.nii|nii.gz)')
     p.add_argument('--name', type=str, help="name of the json config file. Default: 'config'", default="config")
+    p.add_argument('--masks', type=str, nargs="*", help="nifti files (.nii|nii.gz) containing a mask every `file`. Default: []")
 
     return p
 
@@ -27,9 +29,13 @@ def main(brain_manager=None):
     args = parser.parse_args()
 
     sources = []
-    for filename in args.filenames:
+    for filename, mask in izip_longest(args.filenames, args.masks):
         subject = {}
         subject["path"] = os.path.abspath(filename)
+
+        if mask is not None:
+            subject["mask"] = os.path.abspath(mask)
+
         subject["name"] = os.path.basename(filename).split(".nii")[0]
         subject["id"] = int(subject["name"].split("_")[1])
 

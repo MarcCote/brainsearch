@@ -22,7 +22,7 @@ from brainsearch.brain_data import brain_data_factory
 
 from nearpy.hashes import LocalitySensitiveHashing, PCAHashing, SpectralHashing
 from nearpy.distances import EuclideanDistance
-from nearpy.filters import NearestFilter, DistanceThresholdFilter
+from nearpy.filters import SortedFilter, NearestFilter, DistanceThresholdFilter
 from nearpy.utils import chunk, ichunk
 
 from brainsearch.brain_processing import BrainPipelineProcessing, BrainNormalization, BrainResampling
@@ -285,20 +285,21 @@ def check(brain_manager, name, spatial_weight=0.):
     #brain_db.show_large_buckets(sizes, bucketkeys, spatial_weight)
 
 
-def create_map(brain_manager, name, brain_data, K=100, min_nonempty=0, spatial_weight=0.):
-    brain_db = brain_manager[name]
+def create_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_nonempty=0, spatial_weight=0.):
+    brain_db = brain_manager[name.strip("/").split("/")[-1]]
     if brain_db is None:
         raise ValueError("Unexisting brain database: " + name)
 
     patch_shape = brain_db.metadata['patch'].shape
 
     brain_db.engine.distance = EuclideanDistance(brain_db.metadata['patch'])
-    brain_db.engine.filters = [NearestFilter(K)]
-    #brain_db.engine.filters = [DistanceThresholdFilter(10)]
+    brain_db.engine.filters = [DistanceThresholdFilter(threshold), NearestFilter(K)]
+    #brain_db.engine.filters = [SortedFilter()]
 
     half_patch_size = np.array(patch_shape) // 2
 
-    for brain_id, brain in enumerate(brain_data):
+    print "Found {} brains to map".format(len(brain_data))
+    for i, brain in enumerate(brain_data):
         print "Mapping {}...".format(brain.name)
         brain_patches = brain.extract_patches(patch_shape, min_nonempty=min_nonempty)
         vectors = brain_patches.create_vectors(spatial_weight=spatial_weight)
@@ -312,23 +313,26 @@ def create_map(brain_manager, name, brain_data, K=100, min_nonempty=0, spatial_w
         #npositions = -1 * np.ones((len(brain_patches), K, 3), dtype=np.uint16)
 
         start_brain = time.time()
+        cpt = 0
         for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["id", "label"]):
+            cpt += 1
+            if cpt > 5:
+                break
         #for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["label"]):
             #ndists[patch_id, :len(neighbors['dist'])] = neighbors['dist'].flatten()
             nlabels[patch_id, :len(neighbors['label'])] = neighbors['label'].flatten()
             nids[patch_id, :len(neighbors['id'])] = neighbors['id'].flatten()
             #npositions[patch_id, :len(neighbors['position']), :] = neighbors['position']
 
-        print "Brain #{0} ({3:,} patches) found {1:,} neighbors in {2:.2f} sec.".format(brain_id, np.sum(nlabels != -1), time.time()-start_brain, len(brain_patches))
+        print "{4}. Brain #{0} ({3:,} patches) found {1:,} neighbors in {2:.2f} sec.".format(brain.id, np.sum(nlabels != -1), time.time()-start_brain, len(brain_patches), i)
         print "Patches with no neighbors: {:,}".format(np.all(nlabels == -1, axis=1).sum())
 
         ## Generate map of p-values ##
-        # Without using the leave-one-out strategy
-        #control = np.sum(nlabels == 0, axis=1)
-        #parkinson = np.sum(nlabels == 1, axis=1)
-        # Use leave-one-out strategy, i.e. do not use patches coming from the input brain.
-        control = np.sum(np.logical_and(nlabels == 0, nids != brain_id), axis=1)
-        parkinson = np.sum(np.logical_and(nlabels == 1, nids != brain_id), axis=1)
+
+        # Use leave-one-out strategy, i.e. do not use neighbors patches coming from the query brain.
+        control = np.sum(np.logical_and(nlabels == 0, nids != brain.id), axis=1)
+        parkinson = np.sum(np.logical_and(nlabels == 1, nids != brain.id), axis=1)
+
 
         # Weight the proportion by the distance of the query patch from neighbors patch
         #control = np.sum(np.exp(-ndists) * (nlabels == 0), axis=1)
@@ -354,6 +358,64 @@ def create_map(brain_manager, name, brain_data, K=100, min_nonempty=0, spatial_w
         save_nifti(pmap, brain.infos['affine'], pjoin(results_folder, "{}_pmap.nii.gz".format(brain.name)))
         save_nifti(zmap, brain.infos['affine'], pjoin(results_folder, "{}_zmap.nii.gz".format(brain.name)))
         #np.savez(pjoin(results_folder, name), dists=ndists, labels=nlabels, ids=nids, positions=npositions, voxels_positions=center_positions)
+
+
+def create_proximity_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_nonempty=0, spatial_weight=0.):
+    brain_db = brain_manager[name.strip("/").split("/")[-1]]
+    if brain_db is None:
+        raise ValueError("Unexisting brain database: " + name)
+
+    patch_shape = brain_db.metadata['patch'].shape
+
+    brain_db.engine.distance = EuclideanDistance(brain_db.metadata['patch'])
+
+    # TODO: find how to compute a good threshood :/ ?!?
+    brain_db.engine.filters = [DistanceThresholdFilter(threshold), NearestFilter(K)]
+    half_patch_size = np.array(patch_shape) // 2
+
+    print "Found {} brains/regions for wich to compute a proximity-map".format(len(brain_data))
+    for i, brain in enumerate(brain_data):
+        print "Mapping {}...".format(brain.name)
+        brain_patches = brain.extract_patches(patch_shape, min_nonempty=min_nonempty)
+        vectors = brain_patches.create_vectors(spatial_weight=spatial_weight)
+
+        nids = -1 * np.ones((len(brain_patches), K), dtype=np.uint8)  # No more than 256, okay for now,
+        nlabels = -1 * np.ones((len(brain_patches), K), dtype=np.uint8)
+        #ndists = -1 * np.ones((len(brain_patches), K), dtype=np.float32)
+        npositions = -1 * np.ones((len(brain_patches), K, 3), dtype=np.uint16)
+
+        start_brain = time.time()
+        for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["id", "label", "position"]):
+        #for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["label"]):
+            #ndists[patch_id, :len(neighbors['dist'])] = neighbors['dist'].flatten()
+            nlabels[patch_id, :len(neighbors['label'])] = neighbors['label'].flatten()
+            nids[patch_id, :len(neighbors['id'])] = neighbors['id'].flatten()
+            npositions[patch_id, :len(neighbors['position']), :] = neighbors['position']
+
+        print "{4}. Brain #{0} ({3:,} patches) found {1:,} neighbors in {2:.2f} sec.".format(brain.id, np.sum(nlabels != -1), time.time()-start_brain, len(brain_patches), i)
+        print "Patches with no neighbors: {:,}".format(np.all(nlabels == -1, axis=1).sum())
+
+        ## Generate proximity-map ##
+        positions = npositions.reshape((-1, 3))
+        positions = positions[np.where(positions[:, 0] != -1)[0]]
+
+        # Position of extracted patches represent to top left corner.
+        center_positions = positions + half_patch_size
+
+        #proxmap = np.nan * np.ones_like(brain.image, dtype=int)
+        proxmap = np.zeros_like(brain.image, dtype=np.float32)
+        for x, y, z in center_positions:
+            proxmap[x, y, z] += 1
+
+        #proxmap[proxmap == 0] = np.nan
+
+        results_folder = pjoin('.', 'results', brain_db.name, brain_data.name)
+        if not os.path.isdir(results_folder):
+            os.makedirs(results_folder)
+
+        save_nifti(brain.image, brain.infos['affine'], pjoin(results_folder, "{}.nii.gz".format(brain.name)))
+        save_nifti(proxmap, brain.infos['affine'], pjoin(results_folder, "{}_proxmap.nii.gz".format(brain.name)))
+
 
 # def vizu():
 #     from brainsearch.vizu_chaco import NoisyBrainsearchViewer

@@ -54,18 +54,31 @@ class BrainPatches(object):
 
 
 class Brain(object):
-    def __init__(self, image, id, name, label, **infos):
+    def __init__(self, image, id, name, label, mask=None, **infos):
         self.image = image
         self.id = id
         self.name = name
         self.label = label
         self.infos = infos
+        self.mask = mask
 
     def extract_patches(self, patch_shape, min_nonempty=None):
         if min_nonempty > np.prod(patch_shape):
             raise ValueError("min_nonempty must be smaller than nb. of voxels in a patch!")
 
         patches, positions = blockify(self.image, patch_shape, min_nonempty_ratio=min_nonempty)
+
+        if self.mask is not None:
+            half_patch_size = np.array(patch_shape) // 2
+            center_positions = positions + half_patch_size
+            indices = []
+            for pos in zip(*np.where(self.mask)):
+                idx = np.where(np.all(center_positions == pos, axis=1))[0][0]
+                indices.append(idx)
+
+            patches = patches[indices]
+            positions = positions[indices]
+
         return BrainPatches(self, patches, positions)
 
 
@@ -100,7 +113,13 @@ class NiftiBrainData(BrainData):
                 img = nib.load(source['path'])
                 brain = img.get_data()
 
+                mask = None
+                if "mask" in source:
+                    nii_mask = nib.load(source['mask'])
+                    mask = nii_mask.get_data().astype(bool)
+
                 brain = Brain(image=np.asarray(brain, dtype=np.float32), id=id, name=name, label=np.int8(label),
+                              mask=mask,
                               affine=img.get_affine(), pixeldim=img.get_header().get_zooms()[:3],
                               img_shape=img.shape)
 

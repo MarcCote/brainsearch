@@ -39,6 +39,8 @@ def main():
     rng = np.random.RandomState(args.seed)
     for i in range(args.count):
         fa_data = fa.get_data().copy()
+        mask_data = np.zeros(fa_data.shape, dtype="int8")
+
         x = rng.randint(fa.shape[0])
         y = rng.randint(fa.shape[1])
         z = rng.randint(fa.shape[2])
@@ -50,7 +52,7 @@ def main():
             z = rng.randint(fa.shape[2])
             valid_seed = np.sum(fa_data[x:x+patch_shape[0], y:y+patch_shape[1], z:z+patch_shape[2]] == 0.0) < 5
 
-        if args.type == "random":
+        if args.type == "brain":
             pass
         elif args.type == "uniform":
             patch = args.value * np.ones(patch_shape)
@@ -66,9 +68,9 @@ def main():
 
         # Modify patch
         fa_data[x:x+patch_shape[0], y:y+patch_shape[1], z:z+patch_shape[2]] = patch
+        mask_data[x:x+patch_shape[0], y:y+patch_shape[1], z:z+patch_shape[2]] = 1
 
         # Save the frankenstenized brain.
-        new_fa = nib.Nifti1Image(fa_data, fa.affine, header=fa.header, extra=fa.extra)
         filename = os.path.basename(args.fa).replace("control", "freak")
         splits = filename.split("_")
         filename = splits[0] + "_{0}{1}_{1}_".format(splits[1], i) + "_".join(splits[2:])
@@ -78,7 +80,10 @@ def main():
 
         save_path = pjoin(args.out, filename)
         if not os.path.isfile(save_path) or args.force:
-            nib.save(new_fa, save_path)
+            nii_fa_freak = nib.Nifti1Image(fa_data, fa.affine, header=fa.header, extra=fa.extra)
+            nib.save(nii_fa_freak, save_path)
+            nii_mask_freak = nib.Nifti1Image(mask_data, fa.affine, header=fa.header, extra=fa.extra)
+            nib.save(nii_mask_freak, save_path.split(".nii.gz")[0] + "_mask.nii.gz")
         else:
             print "File already existing. Use -f to override it."
 

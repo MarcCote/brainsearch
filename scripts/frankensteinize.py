@@ -80,9 +80,11 @@ def main():
 
         save_path = pjoin(args.out, filename)
         if not os.path.isfile(save_path) or args.force:
-            nii_fa_freak = nib.Nifti1Image(fa_data, fa.affine, header=fa.header, extra=fa.extra)
+            #nii_fa_freak = nib.Nifti1Image(fa_data, fa.affine, header=fa.header, extra=fa.extra)
+            nii_fa_freak = nib.Nifti1Image(fa_data, np.eye(4))
             nib.save(nii_fa_freak, save_path)
-            nii_mask_freak = nib.Nifti1Image(mask_data, fa.affine, header=fa.header, extra=fa.extra)
+            #nii_mask_freak = nib.Nifti1Image(mask_data, fa.affine, header=fa.header, extra=fa.extra)
+            nii_mask_freak = nib.Nifti1Image(mask_data, np.eye(4))
             nib.save(nii_mask_freak, save_path.split(".nii.gz")[0] + "_mask.nii.gz")
         else:
             print "File already existing. Use -f to override it."

@@ -14,7 +14,7 @@ def buildArgsParser():
 
     p.add_argument('filenames', metavar="file", type=str, nargs="+", help='nifti files (.nii|nii.gz)')
     p.add_argument('--name', type=str, help="name of the json config file. Default: 'config'", default="config")
-    p.add_argument('--masks', type=str, nargs="*", help="nifti files (.nii|nii.gz) containing a mask every `file`. Default: []")
+    p.add_argument('--masks', type=str, nargs="*", help="nifti files (.nii|nii.gz) containing a mask every `file`. Default: []", default=[])
 
     return p
 

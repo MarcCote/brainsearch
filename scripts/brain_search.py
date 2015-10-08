@@ -114,6 +114,7 @@ def build_subcommand_map(subparser):
     p.add_argument('-t', '--threshold', type=float, help='keep neighbors with distance < threshold.', default=np.inf)
     p.add_argument('--prefix', type=str, help="prefix for the name of the results files", default="")
     p.add_argument('--radius', type=int, help="only look at neighbors within a certain radius")
+    p.add_argument('--use-dist', action='store_true', help="when computing proportion weigh by the exp(-distance)")
 
 
 def build_subcommand_proximity_map(subparser):
@@ -361,7 +362,8 @@ def main(brain_manager=None):
         brain_data = brain_data_factory(config, pipeline=pipeline, id=args.id)
         framework.create_map(brain_manager, args.name, brain_data, K=args.k, threshold=args.threshold,
                              min_nonempty=args.min_nonempty,
-                             spatial_weight=args.spatial_weight)
+                             spatial_weight=args.spatial_weight,
+                             use_dist=args.use_dist)
 
     elif args.command == "proximity-map":
         config = json.load(open(args.config))

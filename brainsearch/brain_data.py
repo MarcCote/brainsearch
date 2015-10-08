@@ -71,10 +71,15 @@ class Brain(object):
         if self.mask is not None:
             half_patch_size = np.array(patch_shape) // 2
             center_positions = positions + half_patch_size
-            indices = []
-            for pos in zip(*np.where(self.mask)):
-                idx = np.where(np.all(center_positions == pos, axis=1))[0][0]
-                indices.append(idx)
+
+            # indices = []
+            # for pos in zip(*np.where(self.mask)):
+            #     idx = np.where(np.all(center_positions == pos, axis=1))[0]
+            #     if len(idx) > 0:
+            #         indices.append(idx[0])
+
+            mask_pos = set(zip(*np.where(self.mask)))
+            indices = [i for i, pos in enumerate(center_positions) if tuple(pos) in mask_pos]
 
             patches = patches[indices]
             positions = positions[indices]

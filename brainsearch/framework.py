@@ -286,7 +286,7 @@ def check(brain_manager, name, spatial_weight=0.):
     #brain_db.show_large_buckets(sizes, bucketkeys, spatial_weight)
 
 
-def create_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_nonempty=0, spatial_weight=0.):
+def create_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_nonempty=0, spatial_weight=0., use_dist=False):
     brain_db = brain_manager[name.strip("/").split("/")[-1]]
     if brain_db is None:
         raise ValueError("Unexisting brain database: " + name)
@@ -304,23 +304,31 @@ def create_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_non
     print "Found {} brains to map".format(len(brain_data))
     for i, brain in enumerate(brain_data):
         print "Mapping {}...".format(brain.name)
+        from ipdb import set_trace as dbg
+        dbg()
         brain_patches = brain.extract_patches(patch_shape, min_nonempty=min_nonempty)
         vectors = brain_patches.create_vectors(spatial_weight=spatial_weight)
 
         # Position of extracted patches represent to top left corner.
         center_positions = brain_patches.positions + half_patch_size
 
-        nids = -1 * np.ones((len(brain_patches), K), dtype=np.uint8)  # No more than 256, okay for now,
+        nids = -1 * np.ones((len(brain_patches), K), dtype=np.int32)
         nlabels = -1 * np.ones((len(brain_patches), K), dtype=np.uint8)
-        #ndists = -1 * np.ones((len(brain_patches), K), dtype=np.float32)
+        ndists = -1 * np.ones((len(brain_patches), K), dtype=np.float32)
         #npositions = -1 * np.ones((len(brain_patches), K, 3), dtype=np.uint16)
+        #npatches = -1 * np.ones((len(brain_patches), K, int(np.prod(patch_shape))), dtype=np.float32)
 
         start_brain = time.time()
         for patch_id, neighbors in brain_db.get_neighbors(vectors, brain_patches.patches, attributes=["id", "label"]):
             nlabels[patch_id, :len(neighbors['label'])] = neighbors['label'].flatten()
             nids[patch_id, :len(neighbors['id'])] = neighbors['id'].flatten()
-            #ndists[patch_id, :len(neighbors['dist'])] = neighbors['dist'].flatten()
+            ndists[patch_id, :len(neighbors['dist'])] = neighbors['dist'].flatten()
             #npositions[patch_id, :len(neighbors['position']), :] = neighbors['position']
+            #npatches[patch_id, :len(neighbors['patch']), :] = neighbors['patch'].reshape((-1, int(np.prod(patch_shape))))
+
+            # if np.all(center_positions[patch_id] == (84, 114, 115)):
+            #     print patch_id
+            #     from ipdb import set_trace; set_trace()
 
         print "{4}. Brain #{0} ({3:,} patches) found {1:,} neighbors in {2:.2f} sec.".format(brain.id, np.sum(nlabels != -1), time.time()-start_brain, len(brain_patches), i)
         print "Patches with no neighbors: {:,}".format(np.all(nlabels == -1, axis=1).sum())
@@ -331,11 +339,18 @@ def create_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_non
         control = np.sum(np.logical_and(nlabels == 0, nids != brain.id), axis=1)
         parkinson = np.sum(np.logical_and(nlabels == 1, nids != brain.id), axis=1)
 
-        # Weight the proportion by the distance of the query patch from neighbors patch
-        #control = np.sum(np.exp(-ndists) * np.logical_and(nlabels == 0, nids != brain.id), axis=1)
-        #parkinson = np.sum(np.exp(-ndists) * np.logical_and(nlabels == 1, nids != brain.id), axis=1)
-        #control = np.sum((1-ndists) * np.logical_and(nlabels == 0, nids != brain.id), axis=1)
-        #parkinson = np.sum((1-ndists) * np.logical_and(nlabels == 1, nids != brain.id), axis=1)
+        if use_dist:
+            # Weight the proportion by the distance of the query patch from neighbors patch
+            ndists = np.exp(-ndists)
+            # Min-max normalize
+            ndists -= ndists.min(axis=1, keepdims=True)
+            ndists /= ndists.max(axis=1, keepdims=True)
+            control = np.sum(ndists * np.logical_and(nlabels == 0, nids != brain.id), axis=1)
+            parkinson = np.sum(ndists * np.logical_and(nlabels == 1, nids != brain.id), axis=1)
+            # control = np.sum(np.exp(-ndists) * np.logical_and(nlabels == 0, nids != brain.id), axis=1)
+            # parkinson = np.sum(np.exp(-ndists) * np.logical_and(nlabels == 1, nids != brain.id), axis=1)
+            # control = np.sum((1-ndists) * np.logical_and(nlabels == 0, nids != brain.id), axis=1)
+            # parkinson = np.sum((1-ndists) * np.logical_and(nlabels == 1, nids != brain.id), axis=1)
 
         P0 = brain_db.label_proportions()[1]  # Hypothesized population proportion
         p = np.nan_to_num(parkinson / (parkinson+control))  # sample proportion
@@ -343,31 +358,57 @@ def create_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_non
 
         z_statistic, pvalue = two_tailed_test_of_population_proportion(P0, p, n)
 
+        #prop = np.zeros_like(brain.image, dtype=np.float32)
+        #prop[zip(*center_positions)] = p
+
         zmap = np.zeros_like(brain.image, dtype=np.float32)
+        zmap_smooth = np.zeros_like(brain.image, dtype=np.float32)
         pmap = np.ones_like(brain.image, dtype=np.float32)
+        counts = np.zeros_like(brain.image, dtype=np.float32)
 
         # Patches composite z-scores
+        # see https://en.wikipedia.org/wiki/Fisher%27s_method#Relation_to_Stouffer.27s_Z-score_method
         for z in range(patch_shape[2]):
             for y in range(patch_shape[1]):
                 for x in range(patch_shape[0]):
                     pos = brain_patches.positions + np.array((x, y, z))
-                    zmap[zip(*pos)] += z_statistic
+                    zmap_smooth[zip(*pos)] += z_statistic * np.sqrt(n)
+                    counts[zip(*pos)] += n
 
-        zmap[zip(*center_positions)] /= np.sqrt(np.prod(patch_shape))
+        #zmap_smooth[zip(*center_positions)] /= np.sqrt(counts2[zip(*center_positions)])
+        zmap_smooth /= np.sqrt(counts)
+        #zmap_smooth[zip(*center_positions)] /= np.sqrt(np.prod(patch_shape))
+        zmap_smooth[np.isnan(zmap_smooth)] = 0.
 
-        #zmap[zip(*center_positions)] = z_statistic
-        pmap[zip(*center_positions)] = pvalue
+        zmap[zip(*center_positions)] = z_statistic
         zmap[np.isnan(zmap)] = 0.
+
+        import scipy.stats as stat
+        pmap = 2 * stat.norm.cdf(-abs(zmap_smooth))  # Two-tailed test, take twice the lower tail.
         pmap[np.isnan(pmap)] = 1.
 
+        #pmap[zip(*center_positions)] = pvalue
+        #pmap[np.isnan(pmap)] = 1.
+        counts = np.zeros_like(brain.image, dtype=np.float32)
+        counts[zip(*center_positions)] = n
+
         results_folder = pjoin('.', 'results', brain_db.name, brain_data.name)
+        if use_dist:
+            results_folder = pjoin('.', 'results', brain_db.name, brain_data.name, "distance_weighting")
+
         if not os.path.isdir(results_folder):
             os.makedirs(results_folder)
 
         save_nifti(brain.image, brain.infos['affine'], pjoin(results_folder, "{}.nii.gz".format(brain.name)))
-        save_nifti(pmap, brain.infos['affine'], pjoin(results_folder, "{}_pmap.nii.gz".format(brain.name)))
+        #save_nifti(prop, brain.infos['affine'], pjoin(results_folder, "{}_prop.nii.gz".format(brain.name)))
+        #save_nifti(100*pmap, brain.infos['affine'], pjoin(results_folder, "{}_pmap.nii.gz".format(brain.name)))
+        save_nifti(1-pmap, brain.infos['affine'], pjoin(results_folder, "{}_pmap_inv.nii.gz".format(brain.name)))
         save_nifti(zmap, brain.infos['affine'], pjoin(results_folder, "{}_zmap.nii.gz".format(brain.name)))
+        save_nifti(zmap_smooth, brain.infos['affine'], pjoin(results_folder, "{}_zmap_smooth.nii.gz".format(brain.name)))
+        save_nifti(counts, brain.infos['affine'], pjoin(results_folder, "{}_count.nii.gz".format(brain.name)))
         #np.savez(pjoin(results_folder, name), dists=ndists, labels=nlabels, ids=nids, positions=npositions, voxels_positions=center_positions)
+        #from ipdb import set_trace as dbg
+        #dbg()
 
 
 def create_proximity_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_nonempty=0, spatial_weight=0.):

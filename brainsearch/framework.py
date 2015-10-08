@@ -244,8 +244,6 @@ def check(brain_manager, name, spatial_weight=0.):
             std_voxels.append(np.std(patches, axis=0))
             #print sizes[idx], std_voxels[-1].flatten()
 
-    from ipdb import set_trace as dbg
-    dbg()
     rng = np.random.RandomState(42)
 
     NB_PAIRS = 1000
@@ -304,8 +302,6 @@ def create_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_non
     print "Found {} brains to map".format(len(brain_data))
     for i, brain in enumerate(brain_data):
         print "Mapping {}...".format(brain.name)
-        from ipdb import set_trace as dbg
-        dbg()
         brain_patches = brain.extract_patches(patch_shape, min_nonempty=min_nonempty)
         vectors = brain_patches.create_vectors(spatial_weight=spatial_weight)
 

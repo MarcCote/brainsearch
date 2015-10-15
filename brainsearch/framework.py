@@ -295,7 +295,8 @@ def create_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_non
     #brain_db.engine.distance = nearpy.distances.CorrelationDistance(brain_db.metadata['patch'])
 
     # TODO: find how to compute a good threshood :/ ?!?
-    brain_db.engine.filters = [DistanceThresholdFilter(threshold), NearestFilter(K)]
+    #brain_db.engine.filters = [DistanceThresholdFilter(threshold), NearestFilter(K)]
+    brain_db.engine.filters = [NearestFilter(K)]
 
     half_patch_size = np.array(patch_shape) // 2
 
@@ -310,7 +311,7 @@ def create_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_non
 
         nids = -1 * np.ones((len(brain_patches), K), dtype=np.int32)
         nlabels = -1 * np.ones((len(brain_patches), K), dtype=np.uint8)
-        ndists = -1 * np.ones((len(brain_patches), K), dtype=np.float32)
+        ndists = np.nan * np.ones((len(brain_patches), K), dtype=np.float32)
         #npositions = -1 * np.ones((len(brain_patches), K, 3), dtype=np.uint16)
         #npatches = -1 * np.ones((len(brain_patches), K, int(np.prod(patch_shape))), dtype=np.float32)
 
@@ -337,19 +338,22 @@ def create_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_non
 
         if use_dist:
             # Weight the proportion by the distance of the query patch from neighbors patch
-            ndists = np.exp(-ndists)
+            nsimilarities = np.exp(-ndists)
             # Min-max normalize
-            ndists -= ndists.min(axis=1, keepdims=True)
-            ndists /= ndists.max(axis=1, keepdims=True)
-            control = np.sum(ndists * np.logical_and(nlabels == 0, nids != brain.id), axis=1)
-            parkinson = np.sum(ndists * np.logical_and(nlabels == 1, nids != brain.id), axis=1)
+            nsimilarities -= np.nanmin(nsimilarities, axis=1, keepdims=True)
+            nsimilarities /= np.nanmax(nsimilarities, axis=1, keepdims=True)
+            control = np.nansum(nsimilarities * np.logical_and(nlabels == 0, nids != brain.id), axis=1)
+            parkinson = np.nansum(nsimilarities * np.logical_and(nlabels == 1, nids != brain.id), axis=1)
+            control = np.nan_to_num(control)
+            parkinson = np.nan_to_num(parkinson)
             # control = np.sum(np.exp(-ndists) * np.logical_and(nlabels == 0, nids != brain.id), axis=1)
             # parkinson = np.sum(np.exp(-ndists) * np.logical_and(nlabels == 1, nids != brain.id), axis=1)
             # control = np.sum((1-ndists) * np.logical_and(nlabels == 0, nids != brain.id), axis=1)
             # parkinson = np.sum((1-ndists) * np.logical_and(nlabels == 1, nids != brain.id), axis=1)
 
         P0 = brain_db.label_proportions()[1]  # Hypothesized population proportion
-        p = np.nan_to_num(parkinson / (parkinson+control))  # sample proportion
+        p = parkinson / (parkinson+control)  # sample proportion
+        p[np.isnan(p)] = P0
         n = np.sum(nlabels != -1, axis=1)     # sample size
 
         z_statistic, pvalue = two_tailed_test_of_population_proportion(P0, p, n)
@@ -397,14 +401,15 @@ def create_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_non
 
         save_nifti(brain.image, brain.infos['affine'], pjoin(results_folder, "{}.nii.gz".format(brain.name)))
         #save_nifti(prop, brain.infos['affine'], pjoin(results_folder, "{}_prop.nii.gz".format(brain.name)))
-        #save_nifti(100*pmap, brain.infos['affine'], pjoin(results_folder, "{}_pmap.nii.gz".format(brain.name)))
-        save_nifti(1-pmap, brain.infos['affine'], pjoin(results_folder, "{}_pmap_inv.nii.gz".format(brain.name)))
+        save_nifti(pmap, brain.infos['affine'], pjoin(results_folder, "{}_pmap.nii.gz".format(brain.name)))
+        #save_nifti(1-pmap, brain.infos['affine'], pjoin(results_folder, "{}_pmap_inv.nii.gz".format(brain.name)))
         save_nifti(zmap, brain.infos['affine'], pjoin(results_folder, "{}_zmap.nii.gz".format(brain.name)))
         save_nifti(zmap_smooth, brain.infos['affine'], pjoin(results_folder, "{}_zmap_smooth.nii.gz".format(brain.name)))
         save_nifti(counts, brain.infos['affine'], pjoin(results_folder, "{}_count.nii.gz".format(brain.name)))
         #np.savez(pjoin(results_folder, name), dists=ndists, labels=nlabels, ids=nids, positions=npositions, voxels_positions=center_positions)
-        #from ipdb import set_trace as dbg
-        #dbg()
+
+        from ipdb import set_trace as dbg
+        dbg()
 
 
 def create_proximity_map(brain_manager, name, brain_data, K=100, threshold=np.inf, min_nonempty=0, spatial_weight=0.):
